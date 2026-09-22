@@ -1,0 +1,97 @@
+{
+  "name": "dsh-agenda",
+  "version": "0.1.0",
+  "description": "DSH 个人日程管理插件：公历+农历日历（月/周视图）、Today 当日视图、Todo 待办、多级分类、法定节假日/调休、统计与搜索，并提供 13 个 agenda_* 工具与 agenda skill，让 Agent 能用自然语言（含语音转写文本）操作日程。",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/types/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./client": {
+      "types": "./lib/types/client/index.d.ts",
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "lib",
+    "src",
+    "skills",
+    "holidays",
+    "docs",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "dsh-agenda-requirements.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('node:fs').rmSync('lib/client',{recursive:true,force:true})\" && tsdown -c tsdown.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "agenda",
+    "calendar",
+    "lunar",
+    "todo",
+    "agent-tools",
+    "skill"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "js-yaml": "^4.1.0",
+    "ws": "^8.18.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
+    "@deepseek-ai/dsh-skill": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
+    "@deepseek-ai/schemastery": ">=3.18.2 <4.0.0",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-skill": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-skill": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
+    "@deepseek-ai/schemastery": "^3.18.2",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.1",
+    "@types/ws": "^8.5.10",
+    "react": "^18.2.0",
+    "tsdown": "^0.22.2",
+    "typescript": "^5.8.0",
+    "vitest": "^4.1.8"
+  }
+}
