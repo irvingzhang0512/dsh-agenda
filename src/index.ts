@@ -152,6 +152,10 @@ export function apply(ctx: Context): void {
       case 'create-todo': return service.createTodo(args.input as Parameters<AgendaService['createTodo']>[0])
       case 'update-todo': return service.updateTodo(String(args.id), args.patch as Parameters<AgendaService['updateTodo']>[1])
       case 'delete-todo': return service.deleteTodo(String(args.id))
+      case 'todo-instances': return service.listTodoInstances(
+        args.from !== undefined && args.to !== undefined ? { from: String(args.from), to: String(args.to) } : undefined,
+        args.status === 'pending' ? 'pending' : args.status === 'completed' ? 'completed' : undefined,
+      )
       case 'create-category': return service.createCategory(String(args.path))
       case 'delete-category': return service.deleteCategory(String(args.path))
       case 'statistics': return service.statistics({ from: String(args.from), to: String(args.to) })

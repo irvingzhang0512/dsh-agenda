@@ -136,8 +136,9 @@ export function WeekView({
           <div style={{ display: 'flex', justifyContent: 'flex-end', paddingRight: 8, fontSize: 11, color: 'var(--da-text-dim)', alignSelf: 'center' }}>时间</div>
           {days.map(day => {
             const info = infoByDate.get(day)
+            const isNonWork = info?.dayType === 'weekend' || info?.dayType === 'holiday'
             return (
-              <div key={day} style={day === todayStr ? { background: 'rgba(47,111,237,.06)' } : undefined}>
+              <div key={day} className={isNonWork ? 'da-nonwork' : ''} style={day === todayStr ? { background: 'color-mix(in srgb,var(--da-accent) 6%,transparent)' } : undefined}>
                 <span className="da-dow">{weekdayCn(info?.weekday ?? 1)}</span>
                 <span className="da-dom" style={day === todayStr ? { color: 'var(--da-accent)' } : undefined}>{Number(day.slice(8, 10))}</span>
                 {info?.lunarText !== '' && <span className="da-dim" style={{ fontSize: 10 }}>{info?.lunarText}</span>}

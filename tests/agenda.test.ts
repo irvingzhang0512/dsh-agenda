@@ -228,6 +228,113 @@ describe('Todo：CRUD 与状态', () => {
   })
 })
 
+describe('Todo：重复（V0.2）', () => {
+  it('每周重复：按日期展开实例', async () => {
+    const { service, dir } = await makeService()
+    try {
+      const todo = await service.createTodo({ title: '周会', date: '2026-09-01', recurrence: 'weekly' })
+      expect(todo.recurrence).toBe('weekly')
+      const instances = await service.listTodoInstances({ from: '2026-09-01', to: '2026-09-30' })
+      const titles = instances.filter(i => i.templateId === todo.id).map(i => i.date)
+      expect(titles).toEqual(['2026-09-01', '2026-09-08', '2026-09-15', '2026-09-22', '2026-09-29'])
+      expect(instances.every(i => i.status === 'pending')).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('农历每年重复：保留农历字段并换算公历', async () => {
+    const { service, dir } = await makeService()
+    try {
+      const todo = await service.createTodo({
+        title: '家人生日', date: '2026-09-25', recurrence: 'yearly',
+        calendarType: 'lunar', lunarYear: 2026, lunarMonth: 8, lunarDay: 15,
+      })
+      expect(todo.calendarType).toBe('lunar')
+      expect(todo.lunarMonth).toBe(8)
+      expect(todo.lunarDay).toBe(15)
+      expect(todo.date).toBe('2026-09-25')
+      const instances = await service.listTodoInstances({ from: '2026-01-01', to: '2027-12-31' })
+      const dates = instances.filter(i => i.templateId === todo.id).map(i => i.date)
+      expect(dates).toEqual(['2026-09-25', '2027-09-15'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('实例完成/重开（statusDate），下次照常出现', async () => {
+    const { service, dir } = await makeService()
+    try {
+      const todo = await service.createTodo({ title: '健身', date: '2026-09-01', recurrence: 'weekly' })
+      await service.setTodoStatus(todo.id, 'completed', '2026-09-08')
+      const updated = await service.getTodo(todo.id)
+      expect(updated!.completedDates).toEqual(['2026-09-08'])
+      const instances = await service.listTodoInstances({ from: '2026-09-01', to: '2026-09-15' })
+      const byDate = new Map(instances.map(i => [i.date, i.status]))
+      expect(byDate.get('2026-09-01')).toBe('pending')
+      expect(byDate.get('2026-09-08')).toBe('completed')
+      expect(byDate.get('2026-09-15')).toBe('pending') // 下次照常出现
+      await service.setTodoStatus(todo.id, 'pending', '2026-09-08')
+      const reopened = await service.getTodo(todo.id)
+      expect(reopened!.completedDates).toBeUndefined()
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('无 date 完成 = 完成下一个未完成实例', async () => {
+    const { service, dir } = await makeService()
+    try {
+      const todo = await service.createTodo({ title: '打卡', date: '2026-09-01', recurrence: 'daily' })
+      await service.setTodoStatus(todo.id, 'completed')
+      expect((await service.getTodo(todo.id))!.completedDates).toEqual(['2026-09-01'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('非法组合被拒绝：农历 + 非 yearly 重复', async () => {
+    const { service, dir } = await makeService()
+    try {
+      await expect(service.createTodo({
+        title: 'x', date: '2026-09-25', recurrence: 'monthly',
+        calendarType: 'lunar', lunarYear: 2026, lunarMonth: 8, lunarDay: 15,
+      })).rejects.toMatchObject({ code: 'INVALID_ARGUMENT' })
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('清除重复（patch.recurrence=null）回到单次', async () => {
+    const { service, dir } = await makeService()
+    try {
+      const todo = await service.createTodo({ title: '周会', date: '2026-09-01', recurrence: 'weekly' })
+      await service.setTodoStatus(todo.id, 'completed', '2026-09-01')
+      const cleared = await service.updateTodo(todo.id, { recurrence: null })
+      expect(cleared.recurrence).toBeUndefined()
+      expect(cleared.status).toBe('completed')
+      const instances = await service.listTodoInstances({ from: '2026-09-01', to: '2026-09-30' })
+      expect(instances.filter(i => i.templateId === todo.id)).toHaveLength(1)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('统计按实例计数（重复待办在范围内出现多次）', async () => {
+    const { service, dir } = await makeService()
+    try {
+      await service.createTodo({ title: '周会', date: '2026-09-01', recurrence: 'weekly' })
+      await service.setTodoStatus((await service.listTodos())[0]!.id, 'completed', '2026-09-01')
+      const stats = await service.statistics({ from: '2026-09-01', to: '2026-09-30' })
+      expect(stats.todoCount).toBe(5) // 每周一 × 5 周
+      expect(stats.todoCompleted).toBe(1)
+      expect(stats.todoCompletionRate).toBeCloseTo(0.2)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('日历信息 calendarInfo', () => {
   it('2026-09-25 为中秋（农历八月十五，官方 3 天假期首日）', async () => {
     const { service, dir } = await makeService()

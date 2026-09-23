@@ -19,13 +19,15 @@ import {
   addDays, eventDates, parseDate, todayISO,
 } from '../shared/types.ts'
 import type {
-  AgendaEvent, AgendaSettings, AgendaSnapshot, AgendaTodo, DateRange, DayInfo,
-  EventInput, EventPatch, SearchResult, StatisticsResult, TodoInput, TodoPatch,
+  AgendaEvent, AgendaSettings, AgendaSnapshot, AgendaTodo, CalendarType, DateRange, DayInfo,
+  EventInput, EventPatch, SearchResult, StatisticsResult, TodoInput, TodoInstance,
+  TodoPatch, TodoRecurrence,
 } from '../shared/types.ts'
 import type { AgendaStorage } from '../storage/storage.ts'
 import { HolidayService } from './holidays.ts'
 import { AgendaError } from './errors.ts'
 import { normalizeCategoryPath } from './categories.ts'
+import { todoOccurrenceDates } from './recurrence.ts'
 import {
   isLunarNewYearEve, lunarCellText, lunarFestivalOf, lunarToSolar,
   LUNAR_MAX_YEAR, LUNAR_MIN_YEAR, nextDay, solarToLunar,
@@ -35,6 +37,8 @@ import {
 const DEFAULT_SETTINGS: AgendaSettings = { weekStart: 'monday' }
 /** calendarInfo 支持的最大天数（防止滥用）。 */
 const MAX_CALENDAR_DAYS = 400
+/** 待办实例查询的最大天数（重复待办尤其 yearly 需要跨年查询）。 */
+const MAX_TODO_RANGE_DAYS = 3660
 /** 搜索结果截断上限。 */
 const SEARCH_LIMIT = 100
 
@@ -347,13 +351,61 @@ export class AgendaService {
 
   // ── Todo ────────────────────────────────────────────────────────────────
 
+  /** 校验重复/农历字段；返回归一化结果（农历时含换算公历日）。 */
+  private prepareTodoInput(input: TodoInput): {
+    recurrence?: TodoRecurrence
+    calendarType: CalendarType
+    lunarYear?: number
+    lunarMonth?: number
+    lunarDay?: number
+    lunarLeap?: boolean
+    /** 农历基准换算后的公历 `YYYY-MM-DD`；仅 lunar。 */
+    solarDate?: string
+  } {
+    const recurrence = input.recurrence
+    if (recurrence !== undefined
+      && recurrence !== 'daily' && recurrence !== 'weekly' && recurrence !== 'monthly' && recurrence !== 'yearly') {
+      throw new AgendaError('INVALID_ARGUMENT', `待办重复粒度非法: ${String(recurrence)}`)
+    }
+    const calendarType = input.calendarType === 'lunar' ? 'lunar' : 'solar'
+    const fields: ReturnType<AgendaService['prepareTodoInput']> = { recurrence, calendarType }
+    if (calendarType === 'lunar') {
+      if (recurrence !== undefined && recurrence !== 'yearly') {
+        throw new AgendaError('INVALID_ARGUMENT', '农历基准仅支持「每年」重复（yearly）。')
+      }
+      const lunarYear = input.lunarYear
+      const lunarMonth = input.lunarMonth
+      const lunarDay = input.lunarDay
+      if (lunarYear === undefined || lunarMonth === undefined || lunarDay === undefined) {
+        throw new AgendaError('INVALID_LUNAR', '农历待办需要 lunar_year / lunar_month / lunar_day。')
+      }
+      if (lunarYear < LUNAR_MIN_YEAR || lunarYear > LUNAR_MAX_YEAR) {
+        throw new AgendaError('INVALID_LUNAR', `农历年份超出支持范围（${LUNAR_MIN_YEAR}–${LUNAR_MAX_YEAR}）: ${lunarYear}`)
+      }
+      if (lunarMonth < 1 || lunarMonth > 12) throw new AgendaError('INVALID_LUNAR', `农历月份非法（1–12）: ${lunarMonth}`)
+      if (lunarDay < 1 || lunarDay > 30) throw new AgendaError('INVALID_LUNAR', `农历日期非法（1–30）: ${lunarDay}`)
+      const solar = lunarToSolar({ lunarYear, lunarMonth, lunarDay, isLeap: input.lunarLeap === true })
+      if (solar === null) {
+        throw new AgendaError('INVALID_LUNAR', `农历日期不存在: ${lunarYear}年${input.lunarLeap ? '闰' : ''}${lunarMonth}月${lunarDay}日`)
+      }
+      fields.lunarYear = lunarYear
+      fields.lunarMonth = lunarMonth
+      fields.lunarDay = lunarDay
+      fields.lunarLeap = input.lunarLeap === true
+      fields.solarDate = solar
+    }
+    return fields
+  }
+
   /** 创建待办。 */
   async createTodo(input: TodoInput): Promise<AgendaTodo> {
     const title = input.title.trim()
     if (title === '') throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
-    const date = input.date.trim()
+    let date = input.date.trim()
     if (!DATE_RE.test(date)) throw new AgendaError('INVALID_DATE', `待办日期非法（YYYY-MM-DD）: ${input.date}`)
     this.assertDate(date)
+    const prepared = this.prepareTodoInput(input)
+    if (prepared.calendarType === 'lunar' && prepared.solarDate !== undefined) date = prepared.solarDate
     const category = input.category !== undefined && input.category.trim() !== ''
       ? normalizeCategoryPath(input.category)
       : undefined
@@ -364,6 +416,14 @@ export class AgendaService {
       date,
       status: 'pending',
       ...this.stamp(),
+      ...(prepared.recurrence !== undefined ? { recurrence: prepared.recurrence } : {}),
+      ...(prepared.calendarType === 'lunar' ? {
+        calendarType: prepared.calendarType,
+        lunarYear: prepared.lunarYear,
+        lunarMonth: prepared.lunarMonth,
+        lunarDay: prepared.lunarDay,
+        lunarLeap: prepared.lunarLeap,
+      } : {}),
       ...(category !== undefined ? { category } : {}),
       ...(input.description !== undefined && input.description.trim() !== '' ? { description: input.description.trim() } : {}),
     }
@@ -375,13 +435,13 @@ export class AgendaService {
     return todo
   }
 
-  /** 查看单个待办。 */
+  /** 查看单个待办（模板）。 */
   async getTodo(id: string): Promise<AgendaTodo | null> {
     const todos = await this.storage.listTodos()
     return todos.find(todo => todo.id === id) ?? null
   }
 
-  /** 列出待办（可选范围/状态过滤，按日期升序）。 */
+  /** 列出待办模板（可选范围/状态过滤，按日期升序）。快照/编辑用；列表展示请用 listTodoInstances。 */
   async listTodos(range?: DateRange, status?: 'pending' | 'completed'): Promise<AgendaTodo[]> {
     const todos = await this.storage.listTodos()
     if (range !== undefined) this.validateRange(range)
@@ -391,7 +451,44 @@ export class AgendaService {
       .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt))
   }
 
-  /** 修改待办。 */
+  /** 列出 [from,to] 内的待办实例（重复待办按规则展开）；range 省略返回全部。 */
+  async listTodoInstances(range?: DateRange, status?: 'pending' | 'completed'): Promise<TodoInstance[]> {
+    if (range !== undefined) {
+      if (!DATE_RE.test(range.from) || !DATE_RE.test(range.to)) {
+        throw new AgendaError('INVALID_DATE', `日期范围格式非法（YYYY-MM-DD）: ${range.from} → ${range.to}`)
+      }
+      this.assertDate(range.from)
+      this.assertDate(range.to)
+      if (range.to < range.from) throw new AgendaError('INVALID_RANGE', `日期范围 to 早于 from: ${range.from} → ${range.to}`)
+      if (addDays(range.from, MAX_TODO_RANGE_DAYS) < range.to) {
+        throw new AgendaError('RANGE_TOO_LARGE', `待办查询范围过大（上限 ${MAX_TODO_RANGE_DAYS} 天）。`)
+      }
+    }
+    const from = range?.from ?? '0000-01-01'
+    const to = range?.to ?? '9999-12-31'
+    const todos = await this.storage.listTodos()
+    const instances: TodoInstance[] = []
+    for (const todo of todos) {
+      for (const date of todoOccurrenceDates(todo, from, to)) {
+        const completed = todo.recurrence !== undefined
+          ? (todo.completedDates?.includes(date) ?? false)
+          : todo.status === 'completed'
+        if (status !== undefined && ((completed && status !== 'completed') || (!completed && status !== 'pending'))) continue
+        instances.push({
+          templateId: todo.id,
+          date,
+          title: todo.title,
+          ...(todo.category !== undefined ? { category: todo.category } : {}),
+          ...(todo.description !== undefined ? { description: todo.description } : {}),
+          status: completed ? 'completed' : 'pending',
+          ...(todo.recurrence !== undefined ? { recurrence: todo.recurrence } : {}),
+        })
+      }
+    }
+    return instances.sort((a, b) => a.date.localeCompare(b.date) || a.templateId.localeCompare(b.templateId))
+  }
+
+  /** 修改待办（模板字段 + 实例完成/重开）。 */
   async updateTodo(id: string, patch: TodoPatch): Promise<AgendaTodo> {
     if (patch.title !== undefined && patch.title.trim() === '') {
       throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
@@ -404,6 +501,10 @@ export class AgendaService {
     if (patch.status !== undefined && patch.status !== 'pending' && patch.status !== 'completed') {
       throw new AgendaError('INVALID_STATUS', `待办状态非法: ${patch.status}`)
     }
+    if (patch.statusDate !== undefined) {
+      if (!DATE_RE.test(patch.statusDate)) throw new AgendaError('INVALID_DATE', `实例日期非法（YYYY-MM-DD）: ${patch.statusDate}`)
+      this.assertDate(patch.statusDate)
+    }
     const category = patch.category !== undefined && patch.category.trim() !== ''
       ? normalizeCategoryPath(patch.category)
       : undefined
@@ -414,6 +515,53 @@ export class AgendaService {
       if (todo === undefined) throw new AgendaError('NOT_FOUND', `待办不存在: ${id}`)
       if (patch.title !== undefined) todo.title = patch.title.trim()
       if (patch.date !== undefined) todo.date = patch.date.trim()
+
+      // ── 重复 / 农历字段 ──
+      if (patch.recurrence !== undefined || patch.calendarType !== undefined
+        || patch.lunarYear !== undefined || patch.lunarMonth !== undefined || patch.lunarDay !== undefined || patch.lunarLeap !== undefined) {
+        const prepared = this.prepareTodoInput({
+          title: patch.title ?? todo.title,
+          date: patch.date ?? todo.date,
+          recurrence: patch.recurrence === null ? undefined : patch.recurrence,
+          calendarType: patch.calendarType === null ? 'solar' : patch.calendarType,
+          lunarYear: patch.lunarYear,
+          lunarMonth: patch.lunarMonth,
+          lunarDay: patch.lunarDay,
+          lunarLeap: patch.lunarLeap,
+        })
+        if (patch.recurrence === null) {
+          delete todo.recurrence
+          delete todo.calendarType
+          delete todo.lunarYear
+          delete todo.lunarMonth
+          delete todo.lunarDay
+          delete todo.lunarLeap
+          // 清除重复：模板完成状态回到 status/completedAt
+          todo.status = todo.completedDates !== undefined && todo.completedDates.length > 0 ? 'completed' : 'pending'
+          delete todo.completedDates
+        } else {
+          if (prepared.recurrence !== undefined) todo.recurrence = prepared.recurrence
+          if (prepared.calendarType === 'lunar') {
+            todo.calendarType = 'lunar'
+            todo.lunarYear = prepared.lunarYear
+            todo.lunarMonth = prepared.lunarMonth
+            todo.lunarDay = prepared.lunarDay
+            todo.lunarLeap = prepared.lunarLeap
+            // 切农历且未显式改 date 时，用换算日覆盖
+            if (patch.date === undefined && prepared.solarDate !== undefined) todo.date = prepared.solarDate
+          } else {
+            delete todo.calendarType
+            delete todo.lunarYear
+            delete todo.lunarMonth
+            delete todo.lunarDay
+            delete todo.lunarLeap
+            // daily/weekly/monthly 或清除农历：已完成的实例保留，模板状态由 completedDates 派生
+            if (todo.completedDates !== undefined && todo.completedDates.length > 0) todo.status = 'completed'
+            else { todo.status = 'pending'; delete todo.completedDates }
+          }
+        }
+      }
+
       if (category !== undefined) todo.category = category
       else if (patch.category !== undefined) delete todo.category
       if (patch.description !== undefined) {
@@ -421,10 +569,31 @@ export class AgendaService {
         if (value === '') delete todo.description
         else todo.description = value
       }
+
+      // ── 完成 / 重开 ──
       if (patch.status !== undefined) {
-        if (patch.status === 'completed' && todo.status !== 'completed') todo.completedAt = now
-        else if (patch.status === 'pending') delete todo.completedAt
-        todo.status = patch.status
+        if (todo.recurrence === undefined) {
+          // 单次待办：模板级
+          if (patch.status === 'completed' && todo.status !== 'completed') todo.completedAt = now
+          else if (patch.status === 'pending') delete todo.completedAt
+          todo.status = patch.status
+        } else if (patch.statusDate !== undefined) {
+          // 重复待办：指定日期实例
+          const list = new Set(todo.completedDates ?? [])
+          if (patch.status === 'completed') list.add(patch.statusDate)
+          else list.delete(patch.statusDate)
+          todo.completedDates = [...list].sort()
+          if (todo.completedDates.length === 0) delete todo.completedDates
+        } else if (patch.status === 'completed') {
+          // 重复待办未指定日期：完成下一个未完成实例
+          const next = this.nextPendingDate(todo)
+          if (next !== null) {
+            todo.completedDates = [...new Set([...(todo.completedDates ?? []), next])].sort()
+          }
+        } else {
+          // 重复待办重开（未指定日期）：清空全部实例完成
+          delete todo.completedDates
+        }
       }
       todo.updatedAt = now
       return { value: todo }
@@ -433,9 +602,19 @@ export class AgendaService {
     return updated
   }
 
-  /** 完成 / 重新打开待办的快捷方式。 */
-  async setTodoStatus(id: string, status: 'pending' | 'completed'): Promise<AgendaTodo> {
-    return this.updateTodo(id, { status })
+  /** 下一个未完成的实例日期（用于无 date 的完成操作）；全部完成返回 null。 */
+  private nextPendingDate(todo: AgendaTodo): string | null {
+    const done = new Set(todo.completedDates ?? [])
+    const to = addDays(todo.date, MAX_CALENDAR_DAYS)
+    for (const date of todoOccurrenceDates(todo, todo.date, to)) {
+      if (!done.has(date)) return date
+    }
+    return null
+  }
+
+  /** 完成 / 重新打开待办的快捷方式（可指定实例日期）。 */
+  async setTodoStatus(id: string, status: 'pending' | 'completed', statusDate?: string): Promise<AgendaTodo> {
+    return this.updateTodo(id, { status, statusDate })
   }
 
   /** 删除待办；返回被删除对象。 */
@@ -530,9 +709,9 @@ export class AgendaService {
   /** 范围统计（需求 §10）。 */
   async statistics(range: DateRange): Promise<StatisticsResult> {
     this.validateRange(range)
-    const [events, todos] = await Promise.all([
+    const [events, todoInstances] = await Promise.all([
       this.listEvents(range),
-      this.listTodos(range),
+      this.listTodoInstances(range),
     ])
     const byCategory = new Map<string, { eventCount: number, todoCount: number, eventHours: number }>()
     const bump = (category: string, fields: Partial<{ eventCount: number, todoCount: number, eventHours: number }>): void => {
@@ -558,10 +737,10 @@ export class AgendaService {
     }
     let todoCount = 0
     let todoCompleted = 0
-    for (const todo of todos) {
+    for (const instance of todoInstances) {
       todoCount += 1
-      if (todo.status === 'completed') todoCompleted += 1
-      bump(todo.category ?? '未分类', { todoCount: 1 })
+      if (instance.status === 'completed') todoCompleted += 1
+      bump(instance.category ?? '未分类', { todoCount: 1 })
     }
     return {
       range,
@@ -613,7 +792,7 @@ export class AgendaService {
       .filter(todo => {
         const range = options?.todosRange
         if (range === undefined) return true
-        return todo.date >= range.from && todo.date <= range.to
+        return todoOccurrenceDates(todo, range.from, range.to).length > 0
       })
       .sort((a, b) => b.date.localeCompare(a.date))
     const eventTotal = eventHits.length

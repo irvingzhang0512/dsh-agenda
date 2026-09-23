@@ -9,7 +9,7 @@
  */
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { ParameterPropertySpec } from '@deepseek-ai/dsh-tools'
-import type { AgendaEvent, AgendaTodo, DateRange, EventInput, EventPatch, TodoInput, TodoPatch } from '../shared/types.ts'
+import type { AgendaEvent, AgendaTodo, CalendarType, DateRange, EventInput, EventPatch, TodoInput, TodoInstance, TodoPatch, TodoRecurrence } from '../shared/types.ts'
 import type { AgendaService } from '../core/agenda.ts'
 import { AgendaError } from '../core/errors.ts'
 
@@ -96,8 +96,15 @@ const todoSchema = {
   properties: {
     id: { type: 'string' as const, required: true as const, description: '待办 id。' },
     title: { type: 'string' as const, required: true as const, description: '标题。' },
-    date: { type: 'string' as const, required: true as const, description: '日期 YYYY-MM-DD。' },
+    date: { type: 'string' as const, required: true as const, description: '日期 YYYY-MM-DD（农历基准为换算后的公历日）。' },
     status: { type: 'string' as const, required: true as const, enum: ['pending', 'completed'] as const, description: '状态。' },
+    recurrence: { type: 'string' as const, enum: ['daily', 'weekly', 'monthly', 'yearly'] as const, description: '重复粒度；缺省不重复。' },
+    calendar_type: { type: 'string' as const, enum: ['solar', 'lunar'] as const, description: '基准日历类型；lunar 仅用于 yearly 重复。' },
+    lunar_year: { type: 'number' as const, description: '原始农历年（lunar 基准）。' },
+    lunar_month: { type: 'number' as const, description: '原始农历月（lunar 基准）。' },
+    lunar_day: { type: 'number' as const, description: '原始农历日（lunar 基准）。' },
+    lunar_leap: { type: 'boolean' as const, description: '农历闰月（lunar 基准）。' },
+    completed_dates: { type: 'array' as const, items: { type: 'string' as const }, description: '重复待办已完成的实例日期。' },
     category: { type: 'string' as const, description: '多级分类路径。' },
     description: { type: 'string' as const, description: '备注。' },
     completed_at: { type: 'string' as const, description: '完成时间。' },
@@ -110,6 +117,27 @@ const todoArraySchema = {
   type: 'array' as const,
   items: todoSchema,
   description: '待办列表。',
+} satisfies ParameterPropertySpec
+
+/** 展开实例的输出 schema（agenda_list_todos 用）。 */
+const todoInstanceSchema = {
+  type: 'object' as const,
+  additionalProperties: false as const,
+  properties: {
+    template_id: { type: 'string' as const, required: true as const, description: '所属模板待办 id。' },
+    date: { type: 'string' as const, required: true as const, description: '实例日期 YYYY-MM-DD。' },
+    title: { type: 'string' as const, required: true as const, description: '标题。' },
+    status: { type: 'string' as const, required: true as const, enum: ['pending', 'completed'] as const, description: '实例完成状态。' },
+    recurrence: { type: 'string' as const, enum: ['daily', 'weekly', 'monthly', 'yearly'] as const, description: '重复粒度。' },
+    category: { type: 'string' as const, description: '多级分类路径。' },
+    description: { type: 'string' as const, description: '备注。' },
+  },
+} satisfies ParameterPropertySpec
+
+const todoInstanceArraySchema = {
+  type: 'array' as const,
+  items: todoInstanceSchema,
+  description: '待办实例列表（重复待办按日期展开）。',
 } satisfies ParameterPropertySpec
 
 /** 可选日期范围参数（from/to 同时出现才生效）。 */
@@ -138,7 +166,13 @@ const eventInputParams = {
 
 const todoInputParams = {
   title: { type: 'string', description: '标题（必填）。' },
-  date: { type: 'string', description: '日期 YYYY-MM-DD。' },
+  date: { type: 'string', description: '日期 YYYY-MM-DD（农历基准传换算后的公历日，或省略由 lunar_* 自动换算）。' },
+  recurrence: { type: 'string', enum: ['daily', 'weekly', 'monthly', 'yearly'], description: '重复粒度：每天/每周/每月/每年；缺省不重复。' },
+  calendar_type: { type: 'string', enum: ['solar', 'lunar'], description: '基准日历类型；lunar 仅与 yearly 搭配（如每年农历生日）。' },
+  lunar_year: { type: 'number', description: '农历年（lunar 基准，必填）。' },
+  lunar_month: { type: 'number', description: '农历月 1-12（lunar 基准，必填）。' },
+  lunar_day: { type: 'number', description: '农历日 1-30（lunar 基准，必填）。' },
+  lunar_leap: { type: 'boolean', description: '是否闰月（lunar 基准）。' },
   category: { type: 'string', description: '多级分类路径。' },
   description: { type: 'string', description: '备注。' },
 } satisfies Record<string, ParameterPropertySpec>
@@ -216,6 +250,13 @@ interface TodoView {
   title: string
   date: string
   status: 'pending' | 'completed'
+  recurrence?: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  calendar_type?: 'solar' | 'lunar'
+  lunar_year?: number
+  lunar_month?: number
+  lunar_day?: number
+  lunar_leap?: boolean
+  completed_dates?: string[]
   category?: string
   description?: string
   completed_at?: string
@@ -229,11 +270,41 @@ function todoView(todo: AgendaTodo): TodoView {
     title: todo.title,
     date: todo.date,
     status: todo.status,
+    ...(todo.recurrence !== undefined ? { recurrence: todo.recurrence } : {}),
+    ...(todo.calendarType !== undefined ? { calendar_type: todo.calendarType } : {}),
+    ...(todo.lunarYear !== undefined ? { lunar_year: todo.lunarYear } : {}),
+    ...(todo.lunarMonth !== undefined ? { lunar_month: todo.lunarMonth } : {}),
+    ...(todo.lunarDay !== undefined ? { lunar_day: todo.lunarDay } : {}),
+    ...(todo.lunarLeap !== undefined ? { lunar_leap: todo.lunarLeap } : {}),
+    ...(todo.completedDates !== undefined ? { completed_dates: todo.completedDates } : {}),
     ...(todo.category !== undefined ? { category: todo.category } : {}),
     ...(todo.description !== undefined ? { description: todo.description } : {}),
     ...(todo.completedAt !== undefined ? { completed_at: todo.completedAt } : {}),
     created_at: todo.createdAt,
     updated_at: todo.updatedAt,
+  }
+}
+
+/** 展开实例 → 输出视图（snake_case）。 */
+interface TodoInstanceView {
+  template_id: string
+  date: string
+  title: string
+  status: 'pending' | 'completed'
+  recurrence?: 'daily' | 'weekly' | 'monthly' | 'yearly'
+  category?: string
+  description?: string
+}
+
+function todoInstanceView(instance: TodoInstance): TodoInstanceView {
+  return {
+    template_id: instance.templateId,
+    date: instance.date,
+    title: instance.title,
+    status: instance.status,
+    ...(instance.recurrence !== undefined ? { recurrence: instance.recurrence } : {}),
+    ...(instance.category !== undefined ? { category: instance.category } : {}),
+    ...(instance.description !== undefined ? { description: instance.description } : {}),
   }
 }
 
@@ -409,7 +480,10 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
   // ── Todo ────────────────────────────────────────────────────────────────
   disposers.push(ctx.tools.register(defineTool({
     name: 'agenda_create_todo',
-    description: '新建待办。date 为 YYYY-MM-DD。适合「添加一个待办：整理算法评审材料」。',
+    description:
+      '新建待办。date 为 YYYY-MM-DD；支持重复（recurrence=daily/weekly/monthly/yearly，如每周一开会提醒）'
+      + '与农历每年重复（calendar_type=lunar 且 recurrence=yearly，如每年农历八月十五家人生日）。'
+      + '适合「添加一个待办：整理算法评审材料」。',
     parameters: todoInputParams,
     output: {
       schema: outputWith({ todo: todoSchema }),
@@ -418,7 +492,7 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
     execute: async (args, exec) => {
       exec.signal.throwIfAborted()
       try {
-        const todo = await service.createTodo(cleanTodoInput(args as unknown as Record<string, unknown>))
+        const todo = await service.createTodo(cleanTodoCreateInput(cleanTodoInput(args as unknown as Record<string, unknown>)))
         return { ...success('OK', '待办已创建。'), todo: todoView(todo) }
       } catch (error) {
         return failureOf(error)
@@ -428,7 +502,9 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'agenda_update_todo',
-    description: '修改待办（只填要改的字段：title/date/category/description）。',
+    description:
+      '修改待办（只填要改的字段：title/date/category/description/recurrence/calendar_type/lunar_*）。'
+      + 'recurrence 传空串可清除重复。适合「把这个待办改成每周重复」「把待办改到明天」。',
     parameters: {
       id: { type: 'string', description: '待办 id（t_ 开头）。' },
       ...todoInputParams,
@@ -450,9 +526,12 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
 
   disposers.push(ctx.tools.register(defineTool({
     name: 'agenda_complete_todo',
-    description: '完成待办（status → completed）。再次调用同效果。',
+    description:
+      '完成待办（status → completed）。单次待办直接完成；重复待办可传 date 完成指定日期实例'
+      + '（缺省完成下一个未完成实例）。再次调用同效果。',
     parameters: {
       id: { type: 'string', description: '待办 id（t_ 开头）。' },
+      date: { type: 'string', description: '实例日期 YYYY-MM-DD（重复待办可选；缺省完成下一次）。' },
     },
     output: {
       schema: outputWith({ todo: todoSchema }),
@@ -461,7 +540,8 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
     execute: async (args, exec) => {
       exec.signal.throwIfAborted()
       try {
-        const todo = await service.setTodoStatus(String(args.id), 'completed')
+        const date = typeof args.date === 'string' && args.date !== '' ? args.date : undefined
+        const todo = await service.setTodoStatus(String(args.id), 'completed', date)
         return { ...success('OK', '待办已完成。'), todo: todoView(todo) }
       } catch (error) {
         return failureOf(error)
@@ -493,7 +573,8 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
   disposers.push(ctx.tools.register(defineTool({
     name: 'agenda_list_todos',
     description:
-      '列出待办。可传 from/to 限定日期、status=pending|completed 过滤，省略则返回全部。'
+      '列出待办（按日期展开为实例：重复待办会在每个到期日出现一条，带 recurrence 与 template_id）。'
+      + '可传 from/to 限定日期、status=pending|completed 过滤，省略则返回全部。'
       + '适合「今天有什么待办」「这周未完成的待办」。',
     parameters: {
       ...dateRangeParams,
@@ -501,7 +582,7 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
     },
     output: {
       schema: outputWith({
-        todos: todoArraySchema,
+        todos: todoInstanceArraySchema,
         count: { type: 'number', description: '返回条数。' },
       }),
       render: (_args, value) => [{ type: 'text', text: textOf(value as never) }],
@@ -510,8 +591,8 @@ export function registerAgendaTools(ctx: { tools: { register(tool: unknown): () 
       exec.signal.throwIfAborted()
       try {
         const status = args.status === 'completed' ? 'completed' : args.status === 'pending' ? 'pending' : undefined
-        const todos = await service.listTodos(rangeOf(args), status)
-        return { ...success('OK', `共 ${todos.length} 条待办。`), todos: todos.map(todoView), count: todos.length }
+        const instances = await service.listTodoInstances(rangeOf(args), status)
+        return { ...success('OK', `共 ${instances.length} 条待办。`), todos: instances.map(todoInstanceView), count: instances.length }
       } catch (error) {
         return failureOf(error)
       }
@@ -644,12 +725,54 @@ function cleanEventInput(args: Record<string, unknown>): EventInput {
   return input
 }
 
+/** 清洗后的待办输入：recurrence/calendarType 支持 null（清除，仅 update 语义）。 */
+interface CleanTodoInput {
+  title: string
+  date: string
+  category?: string
+  description?: string
+  recurrence?: TodoRecurrence | null
+  calendarType?: CalendarType | null
+  lunarYear?: number
+  lunarMonth?: number
+  lunarDay?: number
+  lunarLeap?: boolean
+}
+
 /** 把工具参数清洗成服务层输入。 */
-function cleanTodoInput(args: Record<string, unknown>): TodoInput & Partial<TodoPatch> {
-  const input: TodoInput & Partial<TodoPatch> = { title: '', date: '' }
+function cleanTodoInput(args: Record<string, unknown>): CleanTodoInput {
+  const input: CleanTodoInput = { title: '', date: '' }
   if (typeof args.title === 'string') input.title = args.title
   if (typeof args.date === 'string') input.date = args.date
   if (typeof args.category === 'string') input.category = args.category
   if (typeof args.description === 'string') input.description = args.description
+  if (args.recurrence === 'daily' || args.recurrence === 'weekly' || args.recurrence === 'monthly' || args.recurrence === 'yearly') {
+    input.recurrence = args.recurrence
+  } else if (args.recurrence === '') {
+    input.recurrence = null // 清除重复
+  }
+  if (args.calendar_type === 'lunar') input.calendarType = 'lunar'
+  else if (args.calendar_type === 'solar') input.calendarType = 'solar'
+  else if (args.calendar_type === '') input.calendarType = null // 清除农历基准
+  if (typeof args.lunar_year === 'number') input.lunarYear = Number(args.lunar_year)
+  if (typeof args.lunar_month === 'number') input.lunarMonth = Number(args.lunar_month)
+  if (typeof args.lunar_day === 'number') input.lunarDay = Number(args.lunar_day)
+  if (typeof args.lunar_leap === 'boolean') input.lunarLeap = Boolean(args.lunar_leap)
   return input
+}
+
+/** create 场景：把 CleanTodoInput 剥成 TodoInput（null → undefined）。 */
+function cleanTodoCreateInput(input: CleanTodoInput): TodoInput {
+  return {
+    title: input.title,
+    date: input.date,
+    ...(input.category !== undefined ? { category: input.category } : {}),
+    ...(input.description !== undefined ? { description: input.description } : {}),
+    ...(input.recurrence !== undefined && input.recurrence !== null ? { recurrence: input.recurrence } : {}),
+    ...(input.calendarType !== undefined && input.calendarType !== null ? { calendarType: input.calendarType } : {}),
+    ...(input.lunarYear !== undefined ? { lunarYear: input.lunarYear } : {}),
+    ...(input.lunarMonth !== undefined ? { lunarMonth: input.lunarMonth } : {}),
+    ...(input.lunarDay !== undefined ? { lunarDay: input.lunarDay } : {}),
+    ...(input.lunarLeap !== undefined ? { lunarLeap: input.lunarLeap } : {}),
+  }
 }

@@ -95,10 +95,11 @@ export function MonthView({
     const visible = events.slice(0, MAX_CHIPS)
     const hidden = events.length - visible.length
     const isToday = day.date === todayStr
+    const isNonWork = day.dayType === 'weekend' || day.dayType === 'holiday'
     return (
       <div
         key={day.date}
-        className={`da-day ${isToday ? 'da-today' : ''}`}
+        className={`da-day ${isToday ? 'da-today' : ''} ${isNonWork ? 'da-nonwork' : ''}`}
         onClick={() => setDetailDate(day.date)}
       >
         <div className="da-day-top">

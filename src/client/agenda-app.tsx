@@ -37,7 +37,7 @@ function AgendaAppInner(): React.ReactElement {
   return (
     <div className="da-root">
       <div className="da-header">
-        <h1>Agenda</h1>
+        <h1>日程</h1>
         <div className="da-nav">
           <button type="button" className={view === 'today' ? 'da-active' : ''} onClick={() => setView('today')}>今天</button>
           <button type="button" className={view === 'month' ? 'da-active' : ''} onClick={() => setView('month')}>月历</button>

@@ -1,5 +1,28 @@
 # 变更记录
 
+## [0.2.0] - 2026-09-22
+
+界面与待办重复升级。
+
+### 新增
+
+- **待办重复**：支持 每天/每周/每月/每年 四种粒度；「每年」可切换农历基准
+  （如每年农历生日，保留原始农历字段并自动换算公历，含闰月规则）。
+  重复待办在待办列表 / 今日视图 / 单日详情按日期展开为实例，每个实例独立完成/重开
+  （勾选只算本次，下次照常出现）。
+- **界面对齐主界面**：面板标题改为「日程」；配色改用 DSH 主题变量
+  （`--dsw-alias-bg-base` / `bg-layer-*` / `border-l*` / `label-*` / `brand-primary` 等），
+  与「新会话」等主界面一致。
+- **日历工作日/非工作日配色**：月视图与周视图中周六/周日/法定节假日的日期数字
+  以红色显示，调休上班日（班）按工作日处理。
+
+### 变更
+
+- `agenda_create_todo` / `agenda_update_todo`：新增 `recurrence`、`calendar_type`、`lunar_*` 参数；
+- `agenda_list_todos`：改为返回按日期展开的实例（含 `template_id` 与 `recurrence`）；
+- `agenda_complete_todo`：新增可选 `date` 参数（完成重复待办的指定日期实例）；
+- todos.csv 新增列：`calendar_type / lunar_year / lunar_month / lunar_day / lunar_leap / recurrence / completed_dates`（旧文件向后兼容）。
+
 ## [0.1.0] - 2026-09-22
 
 首个可用版本（V0.1，对应需求文档 `dsh-agenda-requirements.md`）。

@@ -44,19 +44,51 @@ export interface AgendaEvent {
 /** Todo（待办）状态。 */
 export type TodoStatus = 'pending' | 'completed'
 
+/** 待办重复粒度（缺省 = 不重复）；仅 yearly 支持农历基准。 */
+export type TodoRecurrence = 'daily' | 'weekly' | 'monthly' | 'yearly'
+
 /** Todo（待办）：与 Event 分开管理的核心业务对象。 */
 export interface AgendaTodo {
   id: string
   title: string
-  /** 归属日期 `YYYY-MM-DD`。 */
+  /** 归属日期 `YYYY-MM-DD`（公历基准；农历基准为换算后的公历日）。 */
   date: string
   status: TodoStatus
   category?: string
   description?: string
-  /** 完成时间（ISO-8601）；仅 completed。 */
+  /** 完成时间（ISO-8601）；仅单次待办 completed。 */
   completedAt?: string
+  /** 重复粒度；缺省 = 不重复。 */
+  recurrence?: TodoRecurrence
+  /** 基准日历类型；`lunar` 仅与 `recurrence: 'yearly'` 搭配（农历每年重复）。 */
+  calendarType?: CalendarType
+  /** 原始农历月（1-12）；仅 lunar 基准。 */
+  lunarMonth?: number
+  /** 原始农历日（1-30）；仅 lunar 基准。 */
+  lunarDay?: number
+  /** 原始农历月是否闰月；仅 lunar 基准。 */
+  lunarLeap?: boolean
+  /** 原始农历年；仅 lunar 基准（用于无损还原）。 */
+  lunarYear?: number
+  /** 重复待办的完成实例日期（YYYY-MM-DD）；单次待办仍用 status/completedAt。 */
+  completedDates?: string[]
   createdAt: string
   updatedAt: string
+}
+
+/** 重复待办按日期展开后的一个实例（列表/统计/工具输出用）。 */
+export interface TodoInstance {
+  /** 所属模板 todo.id。 */
+  templateId: string
+  /** 实例日期 `YYYY-MM-DD`。 */
+  date: string
+  title: string
+  category?: string
+  description?: string
+  /** 实例级完成状态（重复待办 = completedDates 命中该日期）。 */
+  status: TodoStatus
+  /** 所属模板的重复粒度；单次待办省略。 */
+  recurrence?: TodoRecurrence
 }
 
 /** 全量快照：WS 连接建立与每次变更后广播。 */
@@ -139,9 +171,25 @@ export interface TodoInput {
   date: string
   category?: string
   description?: string
+  /** 重复粒度；缺省 = 不重复。 */
+  recurrence?: TodoRecurrence
+  /** 基准日历类型；`lunar` 仅与 `recurrence: 'yearly'` 搭配。 */
+  calendarType?: CalendarType
+  lunarYear?: number
+  lunarMonth?: number
+  lunarDay?: number
+  lunarLeap?: boolean
 }
 
-export type TodoPatch = Partial<TodoInput> & { status?: TodoStatus }
+export type TodoPatch = Partial<Omit<TodoInput, 'recurrence' | 'calendarType'>> & {
+  status?: TodoStatus
+  /** 与 status 配合：完成/重开重复待办的指定日期实例；缺省作用于模板级（单次待办）或最近一次实例。 */
+  statusDate?: string
+  /** 重复粒度；null 表示清除（改为不重复）。 */
+  recurrence?: TodoRecurrence | null
+  /** 基准日历类型；null 表示清除（切回公历）。lunar 仅与 yearly 搭配。 */
+  calendarType?: CalendarType | null
+}
 
 // ─── 统计 ────────────────────────────────────────────────────────────────
 
@@ -206,6 +254,7 @@ export type ClientOp =
   | 'create-todo'
   | 'update-todo'
   | 'delete-todo'
+  | 'todo-instances'
   | 'create-category'
   | 'delete-category'
   | 'statistics'

@@ -119,6 +119,67 @@ describe('查询类工具', () => {
   })
 })
 
+describe('重复待办工具（V0.2）', () => {
+  it('agenda_create_todo 支持 recurrence 并返回信封', async () => {
+    const { tools, dir } = await makeTools()
+    try {
+      const result = await tools.get('agenda_create_todo')!.execute({ title: '周会', date: '2026-09-01', recurrence: 'weekly' }, exec)
+      const envelope = result as Record<string, unknown>
+      expect(envelope.ok).toBe(true)
+      expect((envelope.todo as Record<string, unknown>).recurrence).toBe('weekly')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('agenda_create_todo 支持农历每年重复（lunar 字段）', async () => {
+    const { tools, dir } = await makeTools()
+    try {
+      const result = await tools.get('agenda_create_todo')!.execute({
+        title: '家人生日', date: '2026-09-25', recurrence: 'yearly',
+        calendar_type: 'lunar', lunar_year: 2026, lunar_month: 8, lunar_day: 15,
+      }, exec)
+      const envelope = result as Record<string, unknown>
+      expect(envelope.ok).toBe(true)
+      const todo = envelope.todo as Record<string, unknown>
+      expect(todo.calendar_type).toBe('lunar')
+      expect(todo.lunar_day).toBe(15)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('agenda_list_todos 返回展开实例（template_id + recurrence）', async () => {
+    const { tools, dir } = await makeTools()
+    try {
+      await tools.get('agenda_create_todo')!.execute({ title: '周会', date: '2026-09-01', recurrence: 'weekly' }, exec)
+      const result = await tools.get('agenda_list_todos')!.execute({ from: '2026-09-01', to: '2026-09-30' }, exec)
+      const envelope = result as Record<string, unknown>
+      const todos = envelope.todos as Array<Record<string, unknown>>
+      expect(todos).toHaveLength(5)
+      expect(todos[0]!.template_id).toBeTypeOf('string')
+      expect(todos[0]!.recurrence).toBe('weekly')
+      expect(todos[0]!.date).toBe('2026-09-01')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('agenda_complete_todo 支持 date 参数完成指定实例', async () => {
+    const { tools, dir } = await makeTools()
+    try {
+      const created = await tools.get('agenda_create_todo')!.execute({ title: '周会', date: '2026-09-01', recurrence: 'weekly' }, exec)
+      const id = ((created as Record<string, unknown>).todo as Record<string, unknown>).id as string
+      const result = await tools.get('agenda_complete_todo')!.execute({ id, date: '2026-09-08' }, exec)
+      const envelope = result as Record<string, unknown>
+      expect(envelope.ok).toBe(true)
+      expect((envelope.todo as Record<string, unknown>).completed_dates).toEqual(['2026-09-08'])
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})
+
 describe('render 投影', () => {
   it('渲染为可读文本', async () => {
     const { tools, dir } = await makeTools()

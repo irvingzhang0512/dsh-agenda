@@ -18,6 +18,7 @@ import yaml from 'js-yaml'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { AgendaEvent, AgendaSettings, AgendaTodo, CalendarType, TodoStatus } from '../shared/types.ts'
+import { DATE_RE } from '../shared/types.ts'
 import { atomicWriteFile, withLockedFile, type AtomicWriteOptions } from './file-lock.ts'
 import { parseCsv, stringifyCsv } from './csv.ts'
 import type { AgendaStorage, HolidayYear } from './storage.ts'
@@ -32,6 +33,7 @@ const EVENTS_COLUMNS = [
 /** todos.csv 的列序。 */
 const TODOS_COLUMNS = [
   'id', 'title', 'date', 'status', 'category', 'description', 'completed_at', 'created_at', 'updated_at',
+  'calendar_type', 'lunar_year', 'lunar_month', 'lunar_day', 'lunar_leap', 'recurrence', 'completed_dates',
 ] as const
 
 /** 每个文件保留的备份数。 */
@@ -154,6 +156,13 @@ function todoToRow(todo: AgendaTodo): string[] {
     todo.completedAt ?? '',
     todo.createdAt,
     todo.updatedAt,
+    todo.calendarType ?? '',
+    todo.lunarYear !== undefined ? String(todo.lunarYear) : '',
+    todo.lunarMonth !== undefined ? String(todo.lunarMonth) : '',
+    todo.lunarDay !== undefined ? String(todo.lunarDay) : '',
+    todo.lunarLeap === true ? 'true' : '',
+    todo.recurrence ?? '',
+    todo.completedDates !== undefined ? todo.completedDates.join('|') : '',
   ]
 }
 
@@ -177,6 +186,29 @@ function rowToTodo(record: Record<string, string>): AgendaTodo | null {
   if (description !== undefined) todo.description = description
   const completedAt = optional(record.completed_at)
   if (status === 'completed' && completedAt !== undefined) todo.completedAt = completedAt
+  // 重复 / 农历（V0.2 新增列；旧文件缺列时容忍）
+  const recurrence = optional(record.recurrence)
+  if (recurrence === 'daily' || recurrence === 'weekly' || recurrence === 'monthly' || recurrence === 'yearly') {
+    todo.recurrence = recurrence
+  }
+  const calendarType = record.calendar_type === 'lunar' ? 'lunar' : 'solar'
+  if (calendarType === 'lunar') {
+    const lunarYear = numberOrUndefined(record.lunar_year)
+    const lunarMonth = numberOrUndefined(record.lunar_month)
+    const lunarDay = numberOrUndefined(record.lunar_day)
+    if (lunarYear !== undefined && lunarMonth !== undefined && lunarDay !== undefined) {
+      todo.calendarType = 'lunar'
+      todo.lunarYear = lunarYear
+      todo.lunarMonth = lunarMonth
+      todo.lunarDay = lunarDay
+      todo.lunarLeap = boolOf(record.lunar_leap)
+    }
+  }
+  const completedDates = optional(record.completed_dates)
+  if (completedDates !== undefined && completedDates !== '') {
+    const dates = completedDates.split('|').filter(d => DATE_RE.test(d))
+    if (dates.length > 0) todo.completedDates = dates
+  }
   return todo
 }
 

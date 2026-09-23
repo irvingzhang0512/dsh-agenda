@@ -1,14 +1,19 @@
 /**
- * dsh-agenda — 待办视图（需求 §4 Todo 全量管理）。
+ * dsh-agenda — 待办视图（需求 §4 Todo 全量管理 + V0.2 重复待办）。
  *
- * 状态过滤（全部/未完成/已完成）+ 按日期分组列表 + 快速新建 + 勾选完成。
+ * 数据源为 host 展开的实例列表（重复待办在每个到期日出现一条），
+ * 状态过滤（全部/未完成/已完成）+ 按日期分组 + 快速新建 + 勾选实例完成。
  */
-import { useMemo, useState } from 'react'
-import type { AgendaTodo } from '../../shared/types.ts'
+import { useEffect, useMemo, useState } from 'react'
+import type { AgendaTodo, TodoInstance, TodoRecurrence } from '../../shared/types.ts'
 import { cnDate, useAgenda, weekdayCn } from '../agenda-context.tsx'
 import type { TodoEditorMode } from '../components/todo-editor.tsx'
 
 type Filter = 'all' | 'pending' | 'completed'
+
+const RECURRENCE_LABEL: Record<TodoRecurrence, string> = {
+  daily: '每天', weekly: '每周', monthly: '每月', yearly: '每年',
+}
 
 export function TodoView({
   onEditTodo,
@@ -21,19 +26,35 @@ export function TodoView({
   const [filter, setFilter] = useState<Filter>('pending')
   const [quickTitle, setQuickTitle] = useState('')
   const [quickDate, setQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [instances, setInstances] = useState<TodoInstance[]>([])
+
+  // 实例随快照版本变化重新拉取
+  useEffect(() => {
+    let stopped = false
+    void client.listTodoInstances().then(list => {
+      if (!stopped) setInstances(list)
+    }).catch(() => undefined)
+    return () => { stopped = true }
+  }, [client, snapshot?.dataVersion])
+
+  const templates = useMemo(() => {
+    const map = new Map<string, AgendaTodo>()
+    for (const todo of snapshot?.todos ?? []) map.set(todo.id, todo)
+    return map
+  }, [snapshot])
 
   const todos = useMemo(() => {
-    const list = (snapshot?.todos ?? []).filter(todo => {
-      if (filter === 'pending') return todo.status === 'pending'
-      if (filter === 'completed') return todo.status === 'completed'
+    const list = instances.filter(instance => {
+      if (filter === 'pending') return instance.status === 'pending'
+      if (filter === 'completed') return instance.status === 'completed'
       return true
     })
     list.sort((a, b) => (a.status !== b.status ? (a.status === 'pending' ? -1 : 1) : a.date.localeCompare(b.date)))
     return list
-  }, [snapshot, filter])
+  }, [instances, filter])
 
   const groups = useMemo(() => {
-    const map = new Map<string, AgendaTodo[]>()
+    const map = new Map<string, TodoInstance[]>()
     for (const todo of todos) {
       const list = map.get(todo.date) ?? []
       list.push(todo)
@@ -43,10 +64,10 @@ export function TodoView({
   }, [todos])
 
   const counts = useMemo(() => {
-    const all = snapshot?.todos ?? []
-    const pending = all.filter(todo => todo.status === 'pending').length
-    return { all: all.length, pending, completed: all.length - pending }
-  }, [snapshot])
+    const all = instances.length
+    const pending = instances.filter(instance => instance.status === 'pending').length
+    return { all, pending, completed: all - pending }
+  }, [instances])
 
   const addQuick = async (): Promise<void> => {
     const title = quickTitle.trim()
@@ -55,8 +76,17 @@ export function TodoView({
     await client.createTodo({ title, date: quickDate }).catch(() => undefined)
   }
 
-  const toggle = async (todo: AgendaTodo): Promise<void> => {
-    await client.updateTodo(todo.id, { status: todo.status === 'completed' ? 'pending' : 'completed' }).catch(() => undefined)
+  const toggle = async (instance: TodoInstance): Promise<void> => {
+    // 完成/重开该日期实例；单次待办 statusDate 无副作用（走模板级分支）
+    await client.updateTodo(instance.templateId, {
+      status: instance.status === 'completed' ? 'pending' : 'completed',
+      statusDate: instance.date,
+    }).catch(() => undefined)
+  }
+
+  const openEdit = (instance: TodoInstance): void => {
+    const template = templates.get(instance.templateId)
+    if (template !== undefined) onEditTodo({ kind: 'edit', todo: template })
   }
 
   const weekdayOf = (date: string): number => {
@@ -92,13 +122,16 @@ export function TodoView({
             <span className="da-dim">{list.filter(todo => todo.status === 'pending').length} 未完成</span>
           </div>
           <div className="da-list">
-            {list.map(todo => (
-              <div key={todo.id} className={`da-todo-item ${todo.status === 'completed' ? 'da-done' : ''}`}>
-                <span className={`da-check ${todo.status === 'completed' ? 'da-checked' : ''}`} onClick={() => void toggle(todo)}>
-                  {todo.status === 'completed' ? '✓' : ''}
+            {list.map(instance => (
+              <div key={`${instance.templateId}-${instance.date}`} className={`da-todo-item ${instance.status === 'completed' ? 'da-done' : ''}`}>
+                <span className={`da-check ${instance.status === 'completed' ? 'da-checked' : ''}`} onClick={() => void toggle(instance)}>
+                  {instance.status === 'completed' ? '✓' : ''}
                 </span>
-                <span className="da-grow da-todo-title" onClick={() => onEditTodo({ kind: 'edit', todo })}>{todo.title}</span>
-                {todo.category !== undefined && <span className="da-badge da-cat">{todo.category}</span>}
+                <span className="da-grow da-todo-title" onClick={() => openEdit(instance)}>{instance.title}</span>
+                {instance.recurrence !== undefined && (
+                  <span className="da-badge da-weekend" title="重复待办">🔁 {RECURRENCE_LABEL[instance.recurrence]}</span>
+                )}
+                {instance.category !== undefined && <span className="da-badge da-cat">{instance.category}</span>}
               </div>
             ))}
           </div>

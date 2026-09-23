@@ -100,6 +100,49 @@ describe('CSV 往返', () => {
     }
   })
 
+  it('重复待办新列往返（recurrence/农历/completed_dates）', async () => {
+    const { storage, dir } = await makeStorage()
+    try {
+      const recurring: AgendaTodo = {
+        id: 't_recur',
+        title: '家人生日',
+        date: '2026-09-25',
+        status: 'pending',
+        recurrence: 'yearly',
+        calendarType: 'lunar',
+        lunarYear: 2026,
+        lunarMonth: 8,
+        lunarDay: 15,
+        lunarLeap: false,
+        completedDates: ['2026-09-25', '2027-09-15'],
+        createdAt: '2026-09-22T10:00:00.000Z',
+        updatedAt: '2026-09-22T10:00:00.000Z',
+      }
+      await storage.mutateTodos(todos => { todos.push(recurring); return { value: undefined } })
+      const todos = await storage.listTodos()
+      expect(todos).toHaveLength(1)
+      expect(todos[0]).toEqual(recurring)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('旧表头缺列（V0.1 文件）向后兼容', async () => {
+    const { storage, dir } = await makeStorage()
+    try {
+      const oldCsv = 'id,title,date,status,category,description,completed_at,created_at,updated_at\n' +
+        't_old,旧待办,2026-09-20,completed,工作,,2026-09-22T10:00:00.000Z,2026-09-22T09:00:00.000Z,2026-09-22T10:00:00.000Z\n'
+      await storage.writeRaw(join(dir, 'todos.csv'), oldCsv)
+      const todos = await storage.listTodos()
+      expect(todos).toHaveLength(1)
+      expect(todos[0]!.id).toBe('t_old')
+      expect(todos[0]!.recurrence).toBeUndefined()
+      expect(todos[0]!.status).toBe('completed')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
   it('删除后不再出现', async () => {
     const { storage, dir } = await makeStorage()
     try {

@@ -1,14 +1,19 @@
 /**
  * dsh-agenda — 单日详情（月视图点击日期弹出）。
  *
- * 展示当天日程（全天在前、定时按时间序）与待办，并提供新建日程 / 新建待办入口。
- * 数据全部来自共享快照，无额外请求。
+ * 展示当天日程（全天在前、定时按时间序）与待办实例（重复待办当天到期即显示），
+ * 并提供新建日程 / 新建待办入口。日程来自共享快照，待办实例按日拉取。
  */
-import type { AgendaEvent, DayInfo } from '../../shared/types.ts'
+import { useEffect, useState } from 'react'
+import type { AgendaEvent, AgendaTodo, DayInfo, TodoInstance, TodoRecurrence } from '../../shared/types.ts'
 import { eventDates, todayISO } from '../../shared/types.ts'
 import { cnDate, eventTimeText, useAgenda, weekdayCn } from '../agenda-context.tsx'
 import type { EditorMode } from './event-editor.tsx'
 import type { TodoEditorMode } from './todo-editor.tsx'
+
+const RECURRENCE_LABEL: Record<TodoRecurrence, string> = {
+  daily: '每天', weekly: '每周', monthly: '每月', yearly: '每年',
+}
 
 export function DayDetail({
   date,
@@ -27,12 +32,35 @@ export function DayDetail({
   onNewEvent: (date: string) => void
   onNewTodo: (date: string) => void
 }): React.ReactElement {
-  const { snapshot } = useAgenda()
+  const { snapshot, client } = useAgenda()
+  const [todos, setTodos] = useState<TodoInstance[]>([])
+
+  useEffect(() => {
+    let stopped = false
+    void client.listTodoInstances({ from: date, to: date }).then(list => {
+      if (!stopped) setTodos(list)
+    }).catch(() => undefined)
+    return () => { stopped = true }
+  }, [client, date, snapshot?.dataVersion])
+
+  const templates = new Map<string, AgendaTodo>()
+  for (const todo of snapshot?.todos ?? []) templates.set(todo.id, todo)
 
   const events = (snapshot?.events ?? []).filter(event => eventDates(event).includes(date))
   const allDayEvents = events.filter(event => event.allDay)
   const timedEvents = events.filter(event => !event.allDay).sort((a, b) => a.start.localeCompare(b.start))
-  const todos = (snapshot?.todos ?? []).filter(todo => todo.date === date)
+
+  const toggleTodo = async (instance: TodoInstance, completed: boolean): Promise<void> => {
+    await client.updateTodo(instance.templateId, {
+      status: completed ? 'pending' : 'completed',
+      statusDate: instance.date,
+    }).catch(() => undefined)
+  }
+
+  const openEditTodo = (instance: TodoInstance): void => {
+    const template = templates.get(instance.templateId)
+    if (template !== undefined) onEditTodo({ kind: 'edit', todo: template })
+  }
 
   const renderEvent = (event: AgendaEvent): React.ReactElement => (
     <div key={event.id} className={`da-event-item ${event.allDay ? 'da-allday' : ''}`} onClick={() => onEditEvent({ kind: 'edit', event })}>
@@ -82,10 +110,16 @@ export function DayDetail({
         <div className="da-section-title">待办（{todos.length}）</div>
         {todos.length === 0 ? <div className="da-empty">当天没有待办</div> : (
           <div className="da-list">
-            {todos.map(todo => (
-              <div key={todo.id} className={`da-todo-item ${todo.status === 'completed' ? 'da-done' : ''}`}>
-                <span className="da-grow da-todo-title" onClick={() => onEditTodo({ kind: 'edit', todo })}>{todo.title}</span>
-                {todo.category !== undefined && <span className="da-badge da-cat">{todo.category}</span>}
+            {todos.map(instance => (
+              <div key={`${instance.templateId}-${instance.date}`} className={`da-todo-item ${instance.status === 'completed' ? 'da-done' : ''}`}>
+                <span className={`da-check ${instance.status === 'completed' ? 'da-checked' : ''}`} onClick={() => void toggleTodo(instance, instance.status === 'completed')}>
+                  {instance.status === 'completed' ? '✓' : ''}
+                </span>
+                <span className="da-grow da-todo-title" onClick={() => openEditTodo(instance)}>{instance.title}</span>
+                {instance.recurrence !== undefined && (
+                  <span className="da-badge da-weekend" title="重复待办">🔁 {RECURRENCE_LABEL[instance.recurrence]}</span>
+                )}
+                {instance.category !== undefined && <span className="da-badge da-cat">{instance.category}</span>}
               </div>
             ))}
           </div>

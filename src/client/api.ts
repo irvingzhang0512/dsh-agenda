@@ -7,7 +7,7 @@
  * - 所有变更都走 op 往返：请求 id 关联结果，成功后由广播快照驱动刷新。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgendaEvent, AgendaSnapshot, AgendaTodo, ClientOp, DayInfo, EventInput, EventPatch, TodoInput, TodoPatch } from '../shared/types.ts'
+import type { AgendaEvent, AgendaSnapshot, AgendaTodo, ClientOp, DayInfo, EventInput, EventPatch, TodoInput, TodoInstance, TodoPatch } from '../shared/types.ts'
 import type { HostMessage } from '../shared/types.ts'
 
 const BRIDGE_PATH = '/agenda/ws'
@@ -158,6 +158,17 @@ export class AgendaClient {
   }
   deleteTodo(id: string): Promise<{ deleted_id: string }> {
     return this.op('delete-todo', { id })
+  }
+  /** 待办实例列表（重复待办按日期展开；range/status 可选）。 */
+  listTodoInstances(range?: { from: string, to: string }, status?: 'pending' | 'completed'): Promise<TodoInstance[]> {
+    return this.op<TodoInstance[]>('todo-instances', {
+      ...(range !== undefined ? { from: range.from, to: range.to } : {}),
+      ...(status !== undefined ? { status } : {}),
+    })
+  }
+  /** 完成重复待办的指定日期实例（date 缺省 = 完成下一次）。 */
+  completeTodoInstance(id: string, date?: string): Promise<AgendaTodo> {
+    return this.updateTodo(id, { status: 'completed', statusDate: date })
   }
   createCategory(path: string): Promise<string[]> {
     return this.op<string[]>('create-category', { path })

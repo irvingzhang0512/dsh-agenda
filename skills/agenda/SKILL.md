@@ -33,11 +33,11 @@ whenToUse: >-
 | `agenda_delete_event` | 删除日程 | “把这个日程删掉” |
 | `agenda_list_events` | 列出日程（可按日期范围） | “这个月有什么安排” “下周的日程” “今天还有什么事情” |
 | `agenda_search_events` | 搜索日程（标题 / 备注 / 分类） | “查一下这个月和第二技术路线有关的安排” |
-| `agenda_create_todo` | 新建待办 | “添加一个待办：整理算法评审材料” |
-| `agenda_update_todo` | 修改待办 | “把待办改到明天” |
-| `agenda_complete_todo` | 完成待办 | “把这个待办标记完成” |
+| `agenda_create_todo` | 新建待办（可重复：每天/每周/每月/每年；每年可农历基准） | “添加一个待办：整理算法评审材料” “每周一早上开会提醒” “每年农历八月十五家人生日” |
+| `agenda_update_todo` | 修改待办（含重复规则） | “把待办改到明天” “把这个待办改成每周重复” |
+| `agenda_complete_todo` | 完成待办（重复待办可传 date 完成某次实例） | “把这个待办标记完成” |
 | `agenda_delete_todo` | 删除待办 | “删掉这条待办” |
-| `agenda_list_todos` | 列出待办（日期范围 / 状态过滤） | “今天有什么待办” “这周未完成的待办” |
+| `agenda_list_todos` | 列出待办（日期范围 / 状态过滤；重复待办按日期展开为实例） | “今天有什么待办” “这周未完成的待办” |
 | `agenda_search_todos` | 搜索待办 | “找一下和评审相关的待办” |
 | `agenda_get_statistics` | 范围统计（日程数 / 待办完成 / 分类聚合 / 时间投入） | “这周忙不忙” “统计一下这个月的安排” |
 
@@ -52,6 +52,8 @@ whenToUse: >-
 6. “添加一个待办：整理算法评审材料” → `agenda_create_todo(title: "整理算法评审材料", date: <今天>)`
 7. “把这个待办标记完成” → `agenda_complete_todo(id: <待办 id>)`
 8. “统计一下这个月的安排” → `agenda_get_statistics(from: <本月1号>, to: <本月最后一天>)`
+9. “每周一早上开会提醒” → `agenda_create_todo(title: "开会提醒", date: <本周一>, recurrence: "weekly")`
+10. “每年农历八月十五家人生日” → `agenda_create_todo(title: "家人生日", date: <换算公历日>, recurrence: "yearly", calendar_type: "lunar", lunar_year: <当年农历年>, lunar_month: 8, lunar_day: 15)`
 
 ## 日期与时间解析（务必遵守）
 
