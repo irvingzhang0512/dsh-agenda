@@ -52,7 +52,7 @@ function AgendaAppInner(): React.ReactElement {
       <div className="da-main">
         {!connected && (
           <div className="da-card" style={{ marginBottom: 12, color: 'var(--da-text-dim)' }}>
-            正在连接 Agenda 服务…{error !== null ? `（${error}）` : ''}
+            正在连接日程服务…{error !== null ? `（${error}）` : ''}
           </div>
         )}
         {view === 'today' && (

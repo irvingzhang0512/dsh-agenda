@@ -16,9 +16,9 @@ export const inject = ['slots']
 
 /** 侧栏图标（Calendar 线框）。 */
 function AgendaGlyph({ size = 18, active }: { size?: number, active?: boolean }): ReactElement {
-  const stroke = active ? '#2f6fed' : 'currentColor'
+  const stroke = active ? 'var(--dsw-alias-brand-primary, #2f6fed)' : 'currentColor'
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-label="Agenda">
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={stroke} strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-label="日程">
       <rect x="3" y="4.5" width="18" height="17" rx="2.5" />
       <path d="M3 9.5h18" />
       <path d="M8 2.5v4M16 2.5v4" />
@@ -47,7 +47,7 @@ export function apply(ctx: {
 
   // 侧栏条目
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
-    { name: 'sidebar.panellist', id: 'agenda', order: 60, label: () => 'Agenda' },
+    { name: 'sidebar.panellist', id: 'agenda', order: 60, label: () => '日程' },
     (props: { size: number, active: boolean }) => <AgendaGlyph size={props.size} active={props.active} />,
   ))
 

@@ -107,6 +107,33 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-date-head .da-big{font-size:20px;font-weight:700;}
 .da-date-head .da-sub{color:var(--da-text-dim);font-size:13px;}
 .da-date-head .da-sub.da-nonwork{color:var(--da-holiday);}
+
+/* ── DSH 侧边栏面板条目展示覆盖（非 .da- 体系）──────────────────────────
+ * 框架把面板条目渲染为透明灰字行（panelRow），而「新会话」是白卡片（newSession）。
+ * 这里把条目卡片化对齐「新会话」；CSS modules 类名为“哈希前缀+原名”，
+ * 用 [class*=原名] 稳定匹配，失配时自动降级回框架原生样式（纯视觉，无功能影响）。
+ */
+body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"]{
+  border:.5px solid var(--dsw-alias-border-l3,#d0d3d9);
+  background:var(--dsw-alias-button-elevated-fill,#ffffff);
+  border-radius:12px;height:38px;min-height:38px;margin:0 2px;
+  justify-content:center;gap:6px;padding:8px 16px;
+  color:var(--dsw-alias-label-primary,#1f2328);
+  font-size:14px;font-weight:500;line-height:22px;
+}
+body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"]:hover{
+  background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));
+}
+body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"][class*="panelActive"]{
+  background:var(--dsw-alias-interactive-bg-active,rgba(47,111,237,.1));
+  box-shadow:inset 0 0 0 1px var(--dsw-alias-brand-primary,#2f6fed);
+  color:var(--dsw-alias-label-primary,#1f2328);
+}
+/* 折叠态（36px rail）：还原为透明图标，与「新会话」折叠态一致 */
+[class*="collapsed"] nav[class*="panelList"] button[class*="panelRow"]{
+  background:0 0;border-color:transparent;border-radius:8px;
+  width:36px;height:36px;min-height:36px;margin:0;justify-content:center;padding:0;box-shadow:none;
+}
 `
 
 let injected = false
