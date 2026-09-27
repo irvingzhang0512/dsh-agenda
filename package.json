@@ -1,6 +1,6 @@
 {
   "name": "dsh-agenda",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "DSH 个人日程管理插件：公历+农历日历（月/周视图）、Today 当日视图、Todo 待办、多级分类、法定节假日/调休、统计与搜索，并提供 13 个 agenda_* 工具与 agenda skill，让 Agent 能用自然语言（含语音转写文本）操作日程。",
   "type": "module",
   "main": "./lib/index.js",

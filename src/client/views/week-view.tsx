@@ -2,11 +2,13 @@
  * dsh-agenda — 周视图（需求 §3 Calendar 周视图）。
  *
  * 左侧时间轴 + 7 天列；定时事件按时间绝对定位（顶对齐），全天事件在列顶
- * 单独呈现。点击空白格 = 在该时间新建日程；点击事件 = 编辑。
+ * 单独呈现。列头底色按 dayType 区分（day-cell.ts 共享规则，与月视图一致），
+ * 节日名优先替换农历位并着色。点击空白格 = 在该时间新建日程；点击事件 = 编辑。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { AgendaEvent, DayInfo } from '../../shared/types.ts'
 import { eventDates } from '../../shared/types.ts'
+import { cellBgClass, lunarAccentOf } from '../day-cell.ts'
 import { useAgenda, weekdayCn } from '../agenda-context.tsx'
 import type { EditorMode } from '../components/event-editor.tsx'
 
@@ -135,15 +137,21 @@ export function WeekView({
         <div className="da-whead">
           <div style={{ display: 'flex', justifyContent: 'flex-end', paddingRight: 8, fontSize: 11, color: 'var(--da-text-dim)', alignSelf: 'center' }}>时间</div>
           {days.map(day => {
-            const info = infoByDate.get(day)
-            const isNonWork = info?.dayType === 'weekend' || info?.dayType === 'holiday'
+            const dayInfo = infoByDate.get(day)
+            const isNonWork = dayInfo?.dayType === 'weekend' || dayInfo?.dayType === 'holiday'
+            const lunarAccent = dayInfo !== undefined ? lunarAccentOf(dayInfo) : null
             return (
-              <div key={day} className={isNonWork ? 'da-nonwork' : ''} style={day === todayStr ? { background: 'color-mix(in srgb,var(--da-accent) 6%,transparent)' } : undefined}>
-                <span className="da-dow">{weekdayCn(info?.weekday ?? 1)}</span>
+              <div
+                key={day}
+                className={`${isNonWork ? 'da-nonwork' : ''} ${dayInfo !== undefined ? cellBgClass(dayInfo) : ''} ${day === todayStr ? 'da-today-cell' : ''}`}
+              >
+                <span className="da-dow">{weekdayCn(dayInfo?.weekday ?? 1)}</span>
                 <span className="da-dom" style={day === todayStr ? { color: 'var(--da-accent)' } : undefined}>{Number(day.slice(8, 10))}</span>
-                {info?.lunarText !== '' && <span className="da-dim" style={{ fontSize: 10 }}>{info?.lunarText}</span>}
-                {info?.dayType === 'holiday' && <span className="da-badge da-holiday">休</span>}
-                {info?.dayType === 'adjusted-workday' && <span className="da-badge da-work">班</span>}
+                {lunarAccent !== null
+                  ? <span className={`da-dim ${lunarAccent.cls}`} style={{ fontSize: 10 }}>{lunarAccent.text}</span>
+                  : dayInfo?.lunarText !== undefined && dayInfo.lunarText !== '' && <span className="da-dim" style={{ fontSize: 10 }}>{dayInfo.lunarText}</span>}
+                {dayInfo?.dayType === 'holiday' && <span className="da-badge da-holiday">休</span>}
+                {dayInfo?.dayType === 'adjusted-workday' && <span className="da-badge da-work">班</span>}
               </div>
             )
           })}

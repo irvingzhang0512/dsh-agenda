@@ -57,15 +57,28 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-grid{display:grid;grid-template-columns:repeat(7,1fr);}
 .da-grid-head{display:grid;grid-template-columns:repeat(7,1fr);border-bottom:1px solid var(--da-border);}
 .da-grid-head div{text-align:center;padding:6px 0;font-size:12px;color:var(--da-text-dim);}
+.da-grid-head div.da-head-nonwork{color:color-mix(in srgb,var(--da-holiday) 60%,var(--da-text-dim));}
 .da-day{min-height:96px;border-right:1px solid var(--da-border);border-bottom:1px solid var(--da-border);padding:6px;cursor:pointer;position:relative;display:flex;flex-direction:column;gap:2px;overflow:hidden;}
 .da-day:nth-child(7n){border-right:0;}
 .da-day:hover{background:var(--da-hover);}
 .da-day.da-other{color:var(--da-text-dim);opacity:.55;}
-.da-day.da-today{box-shadow:inset 0 0 0 2px var(--da-accent);border-radius:8px;}
+/* 日期格底色体系（MIUI/钉钉式）：周末灰底 / 法定节假日红底 / 调休蓝底 / 今日浅主色底。
+ * 次序约定：.da-day:hover 特异性 (0,2,0) 高于这四类 (0,1,0)，悬停反馈始终生效；
+ * da-today-cell 定义在三个 dayType 底色类之后，同优先级下覆盖它们；
+ * 今天的圆号数字规则（下文）定义在 nonwork 红字规则之后，白字覆盖红字。 */
+.da-weekend-cell{background:color-mix(in srgb,var(--da-card-2) 60%,transparent);}
+.da-holiday-cell{background:color-mix(in srgb,var(--da-holiday) 7%,transparent);}
+.da-adjusted-cell{background:color-mix(in srgb,var(--da-work) 8%,transparent);}
+.da-today-cell{background:color-mix(in srgb,var(--da-accent) 6%,transparent);}
 .da-day-top{display:flex;align-items:center;gap:4px;justify-content:space-between;}
 .da-day-num{font-weight:500;}
 .da-day.da-nonwork .da-day-num{color:var(--da-holiday);}
+.da-day.da-today-cell .da-day-num{width:24px;height:24px;border-radius:50%;background:var(--da-accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;}
 .da-day-lunar{font-size:11px;color:var(--da-text-dim);}
+/* 农历位节日着色：独立类，月视图（da-day-lunar）与周视图列头（da-dim）通用；
+ * 定义在两者之后，同优先级下覆盖灰色。 */
+.da-lunar-holiday{color:var(--da-holiday);font-weight:600;}
+.da-lunar-festival{color:var(--da-warn);font-weight:600;}
 .da-day-badges{display:flex;gap:2px;}
 .da-ev{font-size:11px;padding:1px 5px;border-radius:5px;background:color-mix(in srgb,var(--da-accent) 10%,transparent);color:var(--da-accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:16px;}
 .da-ev.da-allday{background:color-mix(in srgb,var(--da-accent) 18%,transparent);}

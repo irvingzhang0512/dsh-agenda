@@ -1,12 +1,14 @@
 /**
  * dsh-agenda — 月视图（需求 §3 Calendar 月视图）。
  *
- * 7 列网格（按设置 weekStart），展示农历标注、法定节假日/调休角标、节日徽章
+ * 7 列网格（按设置 weekStart），底色区分工作日/周末/法定节假日/调休（MIUI 式三色底），
+ * 展示农历标注（节日名优先替换农历位并着色）、法定节假日/调休角标
  * 与当日日程条目（最多 3 条 + 溢出计数）。点击日期弹单日详情。
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { AgendaEvent, DayInfo } from '../../shared/types.ts'
 import { eventDates } from '../../shared/types.ts'
+import { cellBgClass, lunarAccentOf } from '../day-cell.ts'
 import { eventTimeText, useAgenda, weekdayCn } from '../agenda-context.tsx'
 import { DayDetail } from '../components/day-detail.tsx'
 import type { EditorMode } from '../components/event-editor.tsx'
@@ -79,14 +81,13 @@ export function MonthView({
     setMonth(m)
   }
 
-  const todayStr = new Date().toISOString().slice(0, 10)
-
   const badgeOf = (day: DayInfo): React.ReactElement | null => {
     if (day.dayType === 'holiday') return <span className="da-badge da-holiday">休</span>
     if (day.dayType === 'adjusted-workday') return <span className="da-badge da-work">班</span>
     return null
   }
 
+  /** 单日格：底色按 dayType（day-cell.ts 共享规则），今天叠加 da-today-cell。 */
   const renderDay = (day: DayInfo, index: number): React.ReactElement => {
     if (day.date === '') {
       return <div key={`gap-${index}`} className="da-day da-other" />
@@ -94,20 +95,21 @@ export function MonthView({
     const events = eventsByDate.get(day.date) ?? []
     const visible = events.slice(0, MAX_CHIPS)
     const hidden = events.length - visible.length
-    const isToday = day.date === todayStr
     const isNonWork = day.dayType === 'weekend' || day.dayType === 'holiday'
+    const lunarAccent = lunarAccentOf(day)
     return (
       <div
         key={day.date}
-        className={`da-day ${isToday ? 'da-today' : ''} ${isNonWork ? 'da-nonwork' : ''}`}
+        className={`da-day ${cellBgClass(day)} ${day.isToday ? 'da-today-cell' : ''} ${isNonWork ? 'da-nonwork' : ''}`}
         onClick={() => setDetailDate(day.date)}
       >
         <div className="da-day-top">
           <span className="da-day-num">{Number(day.date.slice(8, 10))}</span>
-          <span className="da-day-lunar">{day.lunarText}</span>
+          <span className={`da-day-lunar ${lunarAccent?.cls ?? ''}`}>
+            {lunarAccent !== null ? lunarAccent.text : day.lunarText}
+          </span>
           <div className="da-day-badges">
             {badgeOf(day)}
-            {day.festival !== undefined && day.festival !== '' && <span className="da-badge da-festival">{day.festival}</span>}
           </div>
         </div>
         {visible.map(event => (
@@ -136,8 +138,10 @@ export function MonthView({
         </div>
         <div className="da-grid-head">
           {Array.from({ length: 7 }, (_, i) => {
-            const weekday = weekStart === 'monday' ? i + 1 : (i % 7) + 1
-            return <div key={weekday}>{weekdayCn(weekday)}</div>
+            // 1=周一 … 7=周日；周日起头时列序为 [日,一,…,六]
+            const weekday = weekStart === 'monday' ? i + 1 : (i + 6) % 7 + 1
+            const isWeekendCol = weekday === 6 || weekday === 7
+            return <div key={weekday} className={isWeekendCol ? 'da-head-nonwork' : ''}>{weekdayCn(weekday)}</div>
           })}
         </div>
         <div className="da-grid">
