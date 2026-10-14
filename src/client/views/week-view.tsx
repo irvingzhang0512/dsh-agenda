@@ -6,6 +6,8 @@
  * 节日名优先替换农历位并着色。点击空白格 = 在该时间新建日程；点击事件 = 编辑。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
+import { HolidayNotice } from '../holiday-notice.tsx'
 import type { AgendaEvent, DayInfo } from '../../shared/types.ts'
 import { eventDates } from '../../shared/types.ts'
 import { cellBgClass, lunarAccentOf } from '../day-cell.ts'
@@ -29,8 +31,8 @@ export function WeekView({
   onEditEvent: (mode: EditorMode) => void
   onNewEvent: (date: string, hour: string) => void
 }): React.ReactElement {
-  const { snapshot, client } = useAgenda()
-  const [anchor, setAnchor] = useState(initialDate)
+  const { snapshot, client, connected } = useAgenda()
+  const [anchor, setAnchor] = usePersistentState('week.anchor', initialDate)
   const [info, setInfo] = useState<DayInfo[]>([])
 
   const weekStart = snapshot?.settings.weekStart ?? 'monday'
@@ -44,12 +46,13 @@ export function WeekView({
   }, [anchor, weekStart])
 
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.rangeInfo(days[0]!, days[6]!).then(list => {
       if (!stopped) setInfo(list)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, days[0], days[6]])
+  }, [client, days[0], days[6], snapshot?.dataVersion])
 
   const infoByDate = useMemo(() => {
     const map = new Map<string, DayInfo>()
@@ -126,6 +129,7 @@ export function WeekView({
 
   return (
     <div>
+      <HolidayNotice years={days.map(day => Number(day.slice(0, 4)))} />
       <div className="da-cal-header" style={{ border: 0, padding: '0 0 12px' }}>
         <button type="button" className="da-btn" onClick={() => shiftWeek(-1)}>‹</button>
         <span className="da-cal-title">{title}</span>

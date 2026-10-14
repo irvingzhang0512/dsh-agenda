@@ -9,7 +9,8 @@
 import type { ReactElement } from 'react'
 import { AgendaApp } from './agenda-app.tsx'
 import { disposeAgendaClient, getAgendaClient } from './api.ts'
-import { injectStyle } from './style.ts'
+import { AgendaSettingsCard } from './settings-card.tsx'
+import { injectStyle, removeStyle } from './style.ts'
 
 /** client 侧需要的服务。 */
 export const inject = ['slots']
@@ -45,6 +46,11 @@ export function apply(ctx: {
     () => <AgendaApp client={client} />,
   ))
 
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register(
+    { name: 'plugins.bundle.config', key: 'dsh-agenda', label: () => '日程设置' },
+    (props: { view?: string }) => <AgendaSettingsCard client={client} view={props.view} />,
+  ))
+
   // 侧栏条目
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register(
     { name: 'sidebar.panellist', id: 'agenda', order: 60, label: () => '日程' },
@@ -54,5 +60,6 @@ export function apply(ctx: {
   // 卸载时释放 WS 连接
   ctx.effect(() => () => {
     disposeAgendaClient()
+    removeStyle()
   }, 'dsh-agenda: client dispose')
 }

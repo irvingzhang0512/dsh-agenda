@@ -5,6 +5,7 @@
  * 待办完成情况、分类聚合（条数 + 时长条形图）。
  */
 import { useCallback, useEffect, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { StatisticsResult } from '../../shared/types.ts'
 import { useAgenda } from '../agenda-context.tsx'
 
@@ -31,9 +32,9 @@ function weekRangeOf(): { from: string, to: string } {
 }
 
 export function StatisticsView(): React.ReactElement {
-  const { client } = useAgenda()
-  const [rangeKey, setRangeKey] = useState<RangeKey>('week')
-  const [custom, setCustom] = useState({ from: '', to: '' })
+  const { client, snapshot, connected } = useAgenda()
+  const [rangeKey, setRangeKey] = usePersistentState<RangeKey>('statistics.rangeKey', 'week')
+  const [custom, setCustom] = usePersistentState('statistics.custom', { from: '', to: '' })
   const [stats, setStats] = useState<StatisticsResult | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -58,7 +59,7 @@ export function StatisticsView(): React.ReactElement {
     }
   }, [client, resolveRange])
 
-  useEffect(() => { void load() }, [load])
+  useEffect(() => { if (connected) void load() }, [load, connected, snapshot?.dataVersion])
 
   const maxTotal = Math.max(1, ...(stats?.byCategory.map(row => row.eventCount + row.todoCount) ?? [1]))
 

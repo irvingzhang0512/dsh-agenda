@@ -19,5 +19,5 @@
 - insert:
     - id: dsh-agenda
       name: dsh-agenda
-      inject: [tools, skills, webServer, webRuntime]
+      inject: [tools, webServer]
       config: {}

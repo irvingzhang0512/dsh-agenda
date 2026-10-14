@@ -1,6 +1,6 @@
 {
   "name": "dsh-agenda",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "DSH 个人日程管理插件：公历+农历日历（月/周视图）、Today 当日视图、Todo 待办、多级分类、法定节假日/调休、统计与搜索，并提供 13 个 agenda_* 工具与 agenda skill，让 Agent 能用自然语言（含语音转写文本）操作日程。",
   "type": "module",
   "main": "./lib/index.js",
@@ -38,7 +38,9 @@
     },
     "client": {
       "platform": "web",
-      "inject": []
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ]
     }
   },
   "scripts": {
@@ -62,29 +64,35 @@
   ],
   "license": "MIT",
   "dependencies": {
-    "js-yaml": "^4.1.0",
-    "ws": "^8.18.0"
+    "js-yaml": "4.3.2",
+    "ws": "8.22.0",
+    "chinese-days": "1.5.9"
   },
   "peerDependencies": {
-    "@deepseek-ai/cordis": ">=4.0.2 <5.0.0",
-    "@deepseek-ai/dsh-skill": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/dsh-tools": ">=0.1.2-rc.1 <0.2.0",
-    "@deepseek-ai/schemastery": ">=3.18.2 <4.0.0",
-    "react": "^18.2.0"
+    "@deepseek-ai/dsh": "0.2.0-rc.2",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4"
   },
   "peerDependenciesMeta": {
+    "@deepseek-ai/dsh": {
+      "optional": true
+    },
     "@deepseek-ai/dsh-skill": {
       "optional": true
     },
-    "react": {
+    "@deepseek-ai/dsh-client-ui-primitives": {
       "optional": true
     }
   },
   "devDependencies": {
-    "@deepseek-ai/cordis": "4.0.2",
-    "@deepseek-ai/dsh-skill": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-tools": "0.1.2-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/dsh-skill": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-tools": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^24.0.0",
     "@types/react": "^18.3.1",
@@ -92,6 +100,11 @@
     "react": "^18.2.0",
     "tsdown": "^0.22.2",
     "typescript": "^5.8.0",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.8",
+    "@deepseek-ai/dsh-host-webserver": "0.2.0-rc.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/irvingzhang0512/dsh-agenda.git"
   }
 }

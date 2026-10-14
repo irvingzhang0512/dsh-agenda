@@ -29,11 +29,6 @@ export interface WebServer {
   registerUpgrade(route: UpgradeRoute): () => void
 }
 
-/** webRuntime 服务面（信任主机清单）。 */
-export interface WebRuntime {
-  trustedHosts: readonly string[]
-}
-
 /** tools 服务面（dsh-tools 已 augment Context；此处供无 augment 的调用点）。 */
 export interface Tools {
   register(tool: ToolDefinition): () => void
@@ -47,7 +42,6 @@ export interface Skills {
 /** 本插件 host 半看到的 Context。 */
 export interface AgendaContextShape {
   webServer: WebServer
-  webRuntime: WebRuntime
   tools: Tools
   skills?: Skills
 }

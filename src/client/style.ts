@@ -11,15 +11,12 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-root *{box-sizing:border-box;}
 .da-header{display:flex;align-items:center;gap:12px;padding:10px 16px;border-bottom:1px solid var(--da-border-strong);background:var(--da-card);flex:none;}
 .da-header h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.2px;}
-.da-nav{display:flex;gap:2px;flex:1;justify-content:center;}
-.da-nav button{border:0;background:transparent;color:var(--da-text-dim);padding:5px 14px;border-radius:6px;cursor:pointer;font-size:13px;}
-.da-nav button:hover{background:var(--da-hover);}
-.da-nav button.da-active{background:var(--da-hover);color:var(--da-text);font-weight:600;}
+.da-nav{flex:1;min-width:0;}
 .da-main{flex:1;min-height:0;overflow:auto;padding:16px;}
 .da-card{background:var(--da-card);border:1px solid var(--da-border);border-radius:10px;padding:14px;}
 .da-btn{border:1px solid var(--da-border);background:var(--da-card);color:var(--da-text);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;}
 .da-btn:hover{background:var(--da-hover);}
-.da-btn.da-primary{background:var(--da-accent);border-color:var(--da-accent);color:#fff;}
+.da-btn.da-primary{background:var(--da-accent);border-color:var(--da-accent);color:var(--dsw-alias-label-primary-inverted,#fff);}
 .da-btn.da-primary:hover{filter:brightness(1.05);}
 .da-btn.da-danger{color:var(--da-holiday);border-color:color-mix(in srgb,var(--da-holiday) 40%,transparent);}
 .da-btn:disabled{opacity:.5;cursor:default;}
@@ -73,7 +70,7 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-day-top{display:flex;align-items:center;gap:4px;justify-content:space-between;}
 .da-day-num{font-weight:500;}
 .da-day.da-nonwork .da-day-num{color:var(--da-holiday);}
-.da-day.da-today-cell .da-day-num{width:24px;height:24px;border-radius:50%;background:var(--da-accent);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-weight:600;}
+.da-day.da-today-cell .da-day-num{width:24px;height:24px;border-radius:50%;background:var(--da-accent);color:var(--dsw-alias-label-primary-inverted,#fff);display:inline-flex;align-items:center;justify-content:center;font-weight:600;}
 .da-day-lunar{font-size:11px;color:var(--da-text-dim);}
 /* 农历位节日着色：独立类，月视图（da-day-lunar）与周视图列头（da-dim）通用；
  * 定义在两者之后，同优先级下覆盖灰色。 */
@@ -92,7 +89,7 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-week .da-whead .da-nonwork .da-dom{color:var(--da-holiday);}
 .da-gutter-hours{grid-column:1;grid-row:3;position:relative;border-top:1px solid var(--da-border);}
 .da-week .da-wcol{position:relative;grid-row:3;border-left:1px solid var(--da-border);}
-.da-hour{position:absolute;left:0;right:0;border-top:1px solid rgba(0,0,0,.05);font-size:10px;color:var(--da-text-dim);padding-left:2px;transform:translateY(-50%);cursor:pointer;}
+.da-hour{position:absolute;left:0;right:0;border-top:1px solid var(--da-border);font-size:10px;color:var(--da-text-dim);padding-left:2px;transform:translateY(-50%);cursor:pointer;}
 .da-wev{position:absolute;left:4px;right:4px;border-radius:6px;background:color-mix(in srgb,var(--da-accent) 12%,transparent);color:var(--da-accent);font-size:11px;padding:2px 6px;overflow:hidden;cursor:pointer;line-height:1.35;}
 .da-wev:hover{background:color-mix(in srgb,var(--da-accent) 20%,transparent);}
 .da-modal{position:fixed;inset:0;background:var(--dsw-alias-bg-mask-2,rgba(0,0,0,.4));display:flex;align-items:center;justify-content:center;z-index:1000;padding:24px;}
@@ -121,32 +118,18 @@ display:flex;flex-direction:column;height:100%;min-height:0;background:var(--da-
 .da-date-head .da-sub{color:var(--da-text-dim);font-size:13px;}
 .da-date-head .da-sub.da-nonwork{color:var(--da-holiday);}
 
-/* ── DSH 侧边栏面板条目展示覆盖（非 .da- 体系）──────────────────────────
- * 框架把面板条目渲染为透明灰字行（panelRow），而「新会话」是白卡片（newSession）。
- * 这里把条目卡片化对齐「新会话」；CSS modules 类名为“哈希前缀+原名”，
- * 用 [class*=原名] 稳定匹配，失配时自动降级回框架原生样式（纯视觉，无功能影响）。
- */
-body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"]{
-  border:.5px solid var(--dsw-alias-border-l3,#d0d3d9);
-  background:var(--dsw-alias-button-elevated-fill,#ffffff);
-  border-radius:12px;height:38px;min-height:38px;margin:0 2px;
-  justify-content:center;gap:6px;padding:8px 16px;
-  color:var(--dsw-alias-label-primary,#1f2328);
-  font-size:14px;font-weight:500;line-height:22px;
-}
-body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"]:hover{
-  background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));
-}
-body [class*="root"]:not([class*="collapsed"]) nav[class*="panelList"] button[class*="panelRow"][class*="panelActive"]{
-  background:var(--dsw-alias-interactive-bg-active,rgba(47,111,237,.1));
-  box-shadow:inset 0 0 0 1px var(--dsw-alias-brand-primary,#2f6fed);
-  color:var(--dsw-alias-label-primary,#1f2328);
-}
-/* 折叠态（36px rail）：还原为透明图标，与「新会话」折叠态一致 */
-[class*="collapsed"] nav[class*="panelList"] button[class*="panelRow"]{
-  background:0 0;border-color:transparent;border-radius:8px;
-  width:36px;height:36px;min-height:36px;margin:0;justify-content:center;padding:0;box-shadow:none;
-}
+.da-settings{height:auto;padding:16px;overflow-wrap:anywhere;}
+.da-settings h2{margin-top:0;}
+.da-settings .da-row{margin-top:12px;}
+.da-grow,.da-day,.da-week .da-whead>div{min-width:0;}
+.da-title,.da-todo-title{overflow-wrap:anywhere;}
+.da-grid,.da-grid-head{grid-template-columns:repeat(7,minmax(0,1fr));}
+.da-week{overflow:auto;}
+.da-whead,.da-wcol{min-width:0;}
+.da-modal-card{box-sizing:border-box;max-width:calc(100vw - 24px);}
+.da-root :focus-visible{outline:2px solid var(--da-accent);outline-offset:2px;}
+@media(max-width:800px){.da-header,.da-date-head,.da-row{flex-wrap:wrap;}.da-nav{order:3;flex-basis:100%;box-sizing:border-box;}.da-main{padding:12px;}.da-day{padding:4px;min-height:90px;}.da-day-top{flex-wrap:wrap;}.da-week{min-width:540px;}.da-main:has(.da-week){overflow-x:auto;}}
+@media(max-width:500px){.da-day-lunar{font-size:10px;}.da-ev{font-size:10px;}.da-header h1{font-size:18px;}.da-cat-row .da-cat-name{min-width:0;}.da-inline{flex-wrap:wrap;}.da-modal-card{padding:14px;}.da-grid-head{font-size:11px;}}
 `
 
 let injected = false

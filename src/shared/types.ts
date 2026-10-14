@@ -97,8 +97,19 @@ export interface AgendaSnapshot {
   todos: AgendaTodo[]
   categories: string[]
   settings: AgendaSettings
+  settingsRevision: string
+  holidayData: HolidayDataSummary
   /** 数据版本号：每次成功变更 +1。 */
   dataVersion: number
+}
+
+/** 离线资料状态，不含原始路径或文件正文。 */
+export interface HolidayDataSummary {
+  packageVersion: string
+  supportedYears: number[]
+  localOverrideYears: number[]
+  legacyFullYears: number[]
+  warnings: string[]
 }
 
 /** 用户设置（settings.yaml）。 */
@@ -246,6 +257,7 @@ export type ClientMessage =
 
 /** 客户端可请求的操作（UI 与 Agent 工具共用同一套 Service）。 */
 export type ClientOp =
+  | 'update-settings'
   | 'get-snapshot'
   | 'calendar-info'
   | 'create-event'

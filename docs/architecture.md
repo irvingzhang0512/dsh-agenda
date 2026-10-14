@@ -1,10 +1,6 @@
 # dsh-agenda 架构说明
 
-节假日库接入契约见 [HOLIDAY-UPDATE-20261014.md](HOLIDAY-UPDATE-20261014.md)（`agenda-holiday-library-20261014-v2`，方向已确认／具体文档待确认）。未来以 chinese-days 提供离线默认值，旧年度 YAML 在读取时与固定旧 seed 基线比较形成覆盖；不新增常驻联网任务／候选状态。下文仍为已实现基线，不代表库已接入。
-
-目标版技术契约：见 [DSH Desktop 0.2.0-rc.2 适配](DSH-UPGRADE-20261011.md)（`agenda-desktop-20261014-v2`，具体文档待确认／待实现）。本文原宿主 API 和设置存储说明保留作为当前组合基线；目标版采用该补充中的通信、刷新、设置、页面与验收边界，不将旧 API 继续当作目标版可用接口。
-
-本文档描述 dsh-agenda V0.1 的架构与关键约定（需求见 `dsh-agenda-requirements.md`）。
+当前技术契约对应 Agenda 0.4.0／DSH Desktop 0.2.0-rc.2。详细迁移与验收边界见 [Desktop v2](DSH-UPGRADE-20261011.md)、[节假日库 v2](HOLIDAY-UPDATE-20261014.md) 和 [验收记录](VERIFICATION-0.4.0.md)，用户已明确确认实施。
 
 ## 1. 总体分层
 
@@ -34,12 +30,12 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
 
 ## 2. 宿主装配（src/index.ts）
 
-- `name = 'dsh-agenda'`，`inject = ['tools', 'skills', 'webServer', 'webRuntime']`
+- `name = 'dsh-agenda'`，`inject = ['tools', 'webServer']`
   （与 `cordis.patch.yml` 一致）。
 - 数据目录 `resolveDataDir()`：`DSH_DATA_DIR` → `$DSH_HOME/data/agenda` → `~/.dsh/data/agenda`。
-- 挂载流程：`ensureLayout()` → `seedBundledHolidays()`（仅缺年份写入）→
+- 挂载流程：`ensureLayout()` → `createHolidaySource()`／有效年度资料校验→
   `registerAgendaTools()` → 异步注册捆绑 skill → `registerUpgrade('/agenda/ws')`。
-- 信任栅栏：WS upgrade 校验 `Origin` / `Host` 落在 `ctx.webRuntime.trustedHosts`。
+- 信任栅栏：WS upgrade 核对回环 socket／Host，原生 Origin 精确为 `dsh-app://app`；HTTP 来源完整 scheme／Host／port 一致；跨站请求拒绝。skills 条件注入，不再依赖 webRuntime。
 
 ## 3. 线协议（src/shared/wire.ts + types.ts）
 
@@ -48,7 +44,9 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
   `{ type: 'op-result', id, ok, message, result? }` / `{ type: 'error', message }`。
 - `ClientOp`：get-snapshot / calendar-info / create-event / update-event / delete-event /
   create-todo / update-todo / delete-todo / create-category / delete-category /
-  statistics / search。
+  statistics / search / todo-instances / update-settings。
+- AgendaSnapshot 追加 settingsRevision 与 holidayData（packageVersion、supportedYears、localOverrideYears、legacyFullYears、warnings），保留事件／待办／分类／settings／dataVersion。
+- update-settings 参数：{ patch: { weekStart }, expectedRevision }，返回完整快照；INVALID_SETTINGS／SETTINGS_CONFLICT 不覆盖文件。
 - 变更类 op 成功后在应答之外向所有连接广播快照。
 - `src/shared/` 零运行时依赖、只承载 JSON 可序列化结构。
 
@@ -76,8 +74,9 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
 
 - `holidays/<year>.yaml`：`{ year, holidays: [{name, dates}], workdays }`。
 - 判定优先级：调休上班（班）> 法定节假日（休，带名称）> 周末 > 工作日。
-- 年数据 60s 缓存；`writeYear` 失效缓存。官方数据捆绑于 `holidays/2025.yaml`、
-  `holidays/2026.yaml`，挂载时 seed（已有年份不覆盖）。
+- Host 读取 chinese-days 1.5.9 的 dist/years JSON（holidays／workdays），标准化中文名；不使用 inLieuDays 重复计数。
+- 年数据 60s 缓存；本地目录变化 100ms 合并通知，重算有效资料后仅在结果或问题变化时递增版本／刷新所有客户端。
+- 包内 2025／2026 YAML 永久保留旧比较基线；本地与基线按日期提取增／改／删，删标记恢复普通周末／工作日。无基线年度整年本地优先；原始 YAML 只读归并。无效文件保持上次有效结果或库默认并报告问题。
 
 ## 7. 工具约定（src/host/tools.ts）
 
@@ -95,7 +94,8 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
 - `categories.yaml` / `settings.yaml` / `holidays/<year>.yaml` 用 js-yaml；
 - 写路径统一 `withLockedFile`：进程内队列串行化 + 跨进程 `.lock`（O_EXCL，心跳续期，
   10s 陈旧接管）+ `.tmp` 原子替换 + `backup/<file>.<stamp>.bak`（保留 10 份）；
-- mutate 抛错不落盘。
+- mutate 抛错不落盘；设置修订按原始字节生成 SHA-256，在锁内再次校验后仅合并白名单键，未知键保留。
+- AgendaService 的写入与快照经 mutationTail 串行，成功才通知；宿主发布串行，客户端新连接先建基线并拒绝旧代次回调。
 
 ## 9. Client（src/client/）
 
@@ -103,9 +103,11 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
   `ctx.slots.inject('sidebar.panellist')` 注册侧栏条目（id `agenda`，order 60）；
   注入样式（`da-` 前缀，DSH CSS 变量 + 兜底）。
 - `api.ts`：单例 WS 客户端（模块级，跨面板切换保活），指数退避重连、
-  断线排队、请求 id 关联超时；月历信息按 `YYYY-MM` 缓存，快照版本变化失效。
+  断线立即拒绝新操作，已发送的失败写入提示核对且不重放；请求 id 关联超时；月历信息按 `YYYY-MM` 缓存，快照版本变化失效。
 - 视图：Today / 月 / 周 / Todo / 统计 / 搜索；EventEditor / TodoEditor /
-  DayDetail 弹窗；所有数据来自共享快照（`AgendaProvider`），无需额外请求。
+  DayDetail 弹窗；日历／实例／搜索／统计查询经相同服务。uiState 在客户端实例内保留视图／草稿，卸载清空。
+- plugins.bundle.config 的 key=dsh-agenda，设置仍归 settings.yaml；原生 Button／SegmentedTabs 由宿主模块表 require。
+- 弹窗焦点闭环／Escape／返回焦点；dirty 关闭先确认。样式与卸载均只作用于自有区域。
 
 ## 10. 扩展点（V0.2+ 预留）
 
@@ -113,4 +115,4 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
 - **重复日程**：`recurrence` 字段已落库（当前仅 `none`），展开逻辑放
   `eventDates()` 层；
 - **语音**：DSH 输入层已完成 STT，agenda skill 直接消费文本，无需改动；
-- **更多节假日年份**：新增 `holidays/<year>.yaml` 即可（无需改代码）。
+- **更多节假日年份**：维护精确 chinese-days 依赖并发布 Agenda 新版；手工年度文件依旧可作为本地资料。

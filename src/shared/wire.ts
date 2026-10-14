@@ -14,7 +14,8 @@ export function parseClientMessage(raw: string): ClientMessage | null {
     const message = value as Record<string, unknown>
     if (message.type === 'hello') return { type: 'hello' }
     if (message.type === 'op') {
-      if (typeof message.id !== 'string' || typeof message.op !== 'string') return null
+      if (typeof message.id !== 'string' || message.id.length > 128 || typeof message.op !== 'string' || message.op.length > 64) return null
+      if (message.args !== undefined && (!message.args || typeof message.args !== 'object' || Array.isArray(message.args))) return null
       const args = (message.args ?? {}) as Record<string, unknown>
       return { type: 'op', id: message.id, op: message.op as ClientOp, args }
     }

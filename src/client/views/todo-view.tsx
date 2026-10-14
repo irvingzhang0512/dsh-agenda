@@ -5,6 +5,7 @@
  * 状态过滤（全部/未完成/已完成）+ 按日期分组 + 快速新建 + 勾选实例完成。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { AgendaTodo, TodoInstance, TodoRecurrence } from '../../shared/types.ts'
 import { cnDate, useAgenda, weekdayCn } from '../agenda-context.tsx'
 import type { TodoEditorMode } from '../components/todo-editor.tsx'
@@ -22,20 +23,21 @@ export function TodoView({
   onEditTodo: (mode: TodoEditorMode) => void
   onNewTodo: (date?: string) => void
 }): React.ReactElement {
-  const { snapshot, client } = useAgenda()
-  const [filter, setFilter] = useState<Filter>('pending')
-  const [quickTitle, setQuickTitle] = useState('')
-  const [quickDate, setQuickDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const { snapshot, client, connected } = useAgenda()
+  const [filter, setFilter] = usePersistentState<Filter>('todo.filter', 'pending')
+  const [quickTitle, setQuickTitle] = usePersistentState('todo.quickTitle', '')
+  const [quickDate, setQuickDate] = usePersistentState('todo.quickDate', () => new Date().toISOString().slice(0, 10))
   const [instances, setInstances] = useState<TodoInstance[]>([])
 
   // 实例随快照版本变化重新拉取
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.listTodoInstances().then(list => {
       if (!stopped) setInstances(list)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, snapshot?.dataVersion])
+  }, [client, connected, snapshot?.dataVersion])
 
   const templates = useMemo(() => {
     const map = new Map<string, AgendaTodo>()
@@ -72,8 +74,7 @@ export function TodoView({
   const addQuick = async (): Promise<void> => {
     const title = quickTitle.trim()
     if (title === '') return
-    setQuickTitle('')
-    await client.createTodo({ title, date: quickDate }).catch(() => undefined)
+    await client.createTodo({ title, date: quickDate }).then(() => setQuickTitle(current => current.trim() === title ? '' : current)).catch(() => undefined)
   }
 
   const toggle = async (instance: TodoInstance): Promise<void> => {

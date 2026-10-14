@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 import type { AgendaEvent, AgendaTodo, DayInfo, TodoInstance, TodoRecurrence } from '../../shared/types.ts'
 import { eventDates, todayISO } from '../../shared/types.ts'
 import { cnDate, eventTimeText, useAgenda, weekdayCn } from '../agenda-context.tsx'
+import { useDialog } from '../dialog.ts'
 import type { EditorMode } from './event-editor.tsx'
 import type { TodoEditorMode } from './todo-editor.tsx'
 
@@ -32,16 +33,18 @@ export function DayDetail({
   onNewEvent: (date: string) => void
   onNewTodo: (date: string) => void
 }): React.ReactElement {
-  const { snapshot, client } = useAgenda()
+  const dialogRef = useDialog(onClose)
+  const { snapshot, client, connected } = useAgenda()
   const [todos, setTodos] = useState<TodoInstance[]>([])
 
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.listTodoInstances({ from: date, to: date }).then(list => {
       if (!stopped) setTodos(list)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, date, snapshot?.dataVersion])
+  }, [client, date, connected, snapshot?.dataVersion])
 
   const templates = new Map<string, AgendaTodo>()
   for (const todo of snapshot?.todos ?? []) templates.set(todo.id, todo)
@@ -85,7 +88,7 @@ export function DayDetail({
 
   return (
     <div className="da-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="da-modal-card">
+      <div className="da-modal-card" ref={dialogRef} role="dialog" aria-modal="true" aria-label="日期详情" tabIndex={-1}>
         <h2 style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
           {cnDate(date)}
           <span className="da-dim">{weekdayCn(dayInfo?.weekday ?? 1)}</span>

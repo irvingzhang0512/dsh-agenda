@@ -5,8 +5,10 @@
  * 分类为路径式多级选择 + 自由输入（首次引用自动登记）。
  */
 import { useEffect, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { AgendaEvent, CalendarType, EventInput } from '../../shared/types.ts'
 import { todayISO } from '../../shared/types.ts'
+import { useDialog } from '../dialog.ts'
 import { useAgenda } from '../agenda-context.tsx'
 
 export type EditorMode =
@@ -18,36 +20,35 @@ export function EventEditor({ mode, onClose }: { mode: EditorMode, onClose: () =
   const editing = mode.kind === 'edit' ? mode.event : null
   const createMode = mode.kind === 'create' ? mode : null
 
-  const [title, setTitle] = useState(editing?.title ?? '')
-  const [calendarType, setCalendarType] = useState<CalendarType>(editing?.calendarType ?? 'solar')
-  const [allDay, setAllDay] = useState(editing?.allDay ?? false)
+  const [title, setTitle] = usePersistentState('eventEditor.title', editing?.title ?? '')
+  const [calendarType, setCalendarType] = usePersistentState<CalendarType>('eventEditor.calendarType', editing?.calendarType ?? 'solar')
+  const [allDay, setAllDay] = usePersistentState('eventEditor.allDay', editing?.allDay ?? false)
   // 公历
-  const [startDate, setStartDate] = useState(editing?.start.slice(0, 10) ?? createMode?.date ?? todayISO())
-  const [startTime, setStartTime] = useState(() => editing !== null && !editing.allDay ? editing.start.slice(11, 16) : createMode?.hour ?? '09:00')
-  const [endDate, setEndDate] = useState(editing?.end.slice(0, 10) ?? createMode?.date ?? todayISO())
-  const [endTime, setEndTime] = useState(() => editing !== null && !editing.allDay ? editing.end.slice(11, 16) : '10:00')
+  const [startDate, setStartDate] = usePersistentState('eventEditor.startDate', editing?.start.slice(0, 10) ?? createMode?.date ?? todayISO())
+  const [startTime, setStartTime] = usePersistentState('eventEditor.startTime', () => editing !== null && !editing.allDay ? editing.start.slice(11, 16) : createMode?.hour ?? '09:00')
+  const [endDate, setEndDate] = usePersistentState('eventEditor.endDate', editing?.end.slice(0, 10) ?? createMode?.date ?? todayISO())
+  const [endTime, setEndTime] = usePersistentState('eventEditor.endTime', () => editing !== null && !editing.allDay ? editing.end.slice(11, 16) : '10:00')
   // 农历
-  const [lunarYear, setLunarYear] = useState(() => editing?.lunarYear ?? todayInfo?.lunarYear ?? Number(todayISO().slice(0, 4)))
-  const [lunarMonth, setLunarMonth] = useState(() => editing?.lunarMonth ?? 1)
-  const [lunarDay, setLunarDay] = useState(() => editing?.lunarDay ?? 1)
-  const [lunarLeap, setLunarLeap] = useState(() => editing?.lunarLeap ?? false)
-  const [lunarStartTime, setLunarStartTime] = useState(() => editing?.lunarMonth !== undefined && !editing.allDay ? editing.start.slice(11, 16) : '09:00')
-  const [lunarEndTime, setLunarEndTime] = useState(() => editing?.lunarMonth !== undefined && !editing.allDay ? editing.end.slice(11, 16) : '10:00')
+  const [lunarYear, setLunarYear] = usePersistentState('eventEditor.lunarYear', () => editing?.lunarYear ?? todayInfo?.lunarYear ?? Number(todayISO().slice(0, 4)))
+  const [lunarMonth, setLunarMonth] = usePersistentState('eventEditor.lunarMonth', () => editing?.lunarMonth ?? 1)
+  const [lunarDay, setLunarDay] = usePersistentState('eventEditor.lunarDay', () => editing?.lunarDay ?? 1)
+  const [lunarLeap, setLunarLeap] = usePersistentState('eventEditor.lunarLeap', () => editing?.lunarLeap ?? false)
+  const [lunarStartTime, setLunarStartTime] = usePersistentState('eventEditor.lunarStartTime', () => editing?.lunarMonth !== undefined && !editing.allDay ? editing.start.slice(11, 16) : '09:00')
+  const [lunarEndTime, setLunarEndTime] = usePersistentState('eventEditor.lunarEndTime', () => editing?.lunarMonth !== undefined && !editing.allDay ? editing.end.slice(11, 16) : '10:00')
 
-  const [category, setCategory] = useState(editing?.category ?? '')
-  const [location, setLocation] = useState(editing?.location ?? '')
-  const [description, setDescription] = useState(editing?.description ?? '')
+  const [category, setCategory] = usePersistentState('eventEditor.category', editing?.category ?? '')
+  const [location, setLocation] = usePersistentState('eventEditor.location', editing?.location ?? '')
+  const [description, setDescription] = usePersistentState('eventEditor.description', editing?.description ?? '')
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    // create 模式跟随传入日期（视图点击时更新）
-    if (createMode !== null && createMode.date !== undefined) {
-      setStartDate(createMode.date)
-      setEndDate(createMode.date)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode])
+
+  const draft = JSON.stringify([title, calendarType, allDay, startDate, startTime, endDate, endTime, lunarYear, lunarMonth, lunarDay, lunarLeap, lunarStartTime, lunarEndTime, category, location, description])
+  const [baseline] = usePersistentState('eventEditor.baseline', draft)
+  const requestClose = (): void => {
+    if (!saving && (draft === baseline || window.confirm('放弃未保存的修改吗？'))) onClose()
+  }
+  const dialogRef = useDialog(requestClose)
 
   const categories = snapshot?.categories ?? []
 
@@ -109,13 +110,13 @@ export function EventEditor({ mode, onClose }: { mode: EditorMode, onClose: () =
   }
 
   return (
-    <div className="da-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="da-modal-card">
+    <div className="da-modal" onMouseDown={e => { if (e.target === e.currentTarget) requestClose() }}>
+      <div className="da-modal-card" ref={dialogRef} role="dialog" aria-modal="true" aria-label="日程编辑" tabIndex={-1}>
         <h2>{editing !== null ? '编辑日程' : '新建日程'}</h2>
         <div className="da-form">
           <div className="da-field">
             <label>标题 *</label>
-            <input className="da-input" value={title} onChange={e => setTitle(e.target.value)} autoFocus placeholder="例如：算法评审" />
+            <input className="da-input" value={title} onChange={e => setTitle(e.target.value)} placeholder="例如：算法评审" />
           </div>
 
           <div className="da-inline">
@@ -199,7 +200,7 @@ export function EventEditor({ mode, onClose }: { mode: EditorMode, onClose: () =
             {editing !== null && (
               <button type="button" className="da-btn da-danger" onClick={() => void remove()} disabled={saving}>删除</button>
             )}
-            <button type="button" className="da-btn" onClick={onClose} disabled={saving}>取消</button>
+            <button type="button" className="da-btn" onClick={requestClose} disabled={saving}>取消</button>
             <button type="button" className="da-btn da-primary" onClick={() => void save()} disabled={saving}>
               {saving ? '保存中…' : '保存'}
             </button>

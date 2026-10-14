@@ -17,6 +17,9 @@
 import yaml from 'js-yaml'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
+import { AgendaError } from '../core/errors.ts'
+import { normalizeHolidayYear } from '../core/holiday-data.ts'
 import type { AgendaEvent, AgendaSettings, AgendaTodo, CalendarType, TodoStatus } from '../shared/types.ts'
 import { DATE_RE } from '../shared/types.ts'
 import { atomicWriteFile, withLockedFile, type AtomicWriteOptions } from './file-lock.ts'
@@ -351,19 +354,43 @@ export class CsvAgendaStorage implements AgendaStorage {
 
   // ── 设置 ──
 
+  private async settingsRaw(): Promise<string | null> {
+    return readFile(this.settingsPath, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
+  }
+
+  private settingsRevision(raw: string | null): string {
+    return createHash('sha256').update(raw === null ? 'missing' : 'present\\0' + raw).digest('hex')
+  }
+
+  async settingsState(): Promise<{ settings: AgendaSettings, revision: string }> {
+    const raw = await this.settingsRaw()
+    let weekStart: AgendaSettings['weekStart'] = 'monday'
+    try { const value = raw === null ? null : yaml.load(raw) as { weekStart?: unknown }; if (value?.weekStart === 'sunday') weekStart = 'sunday' } catch { /* 保存时严格拒绝错误原件，读取保持默认可用。 */ }
+    return { settings: { weekStart }, revision: this.settingsRevision(raw) }
+  }
+
   async loadSettings(): Promise<AgendaSettings | null> {
-    const data = await readYaml<{ weekStart?: unknown }>(this.settingsPath)
-    if (data === null) return null
-    return {
-      weekStart: data.weekStart === 'sunday' ? 'sunday' : 'monday',
-    }
+    if (await this.settingsRaw() === null) return null
+    return (await this.settingsState()).settings
   }
 
   async saveSettings(settings: AgendaSettings): Promise<void> {
-    await atomicWriteFile(this.settingsPath, yaml.dump(
-      { weekStart: settings.weekStart },
-      { lineWidth: 120 },
-    ), this.writeOptions)
+    await this.updateSettings(settings, (await this.settingsState()).revision)
+  }
+
+  async updateSettings(patch: Partial<AgendaSettings>, expectedRevision: string): Promise<void> {
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch) || Object.keys(patch).some(key => key !== 'weekStart') || (patch.weekStart !== 'monday' && patch.weekStart !== 'sunday')) {
+      throw new AgendaError('INVALID_SETTINGS', '周起始日须为周一或周日。')
+    }
+    await withLockedFile(this.settingsPath, this.writeOptions, current => {
+      if (typeof expectedRevision !== 'string' || expectedRevision !== this.settingsRevision(current)) throw new AgendaError('SETTINGS_CONFLICT', '设置已被其他窗口修改，请刷新后再保存；草稿已保留。')
+      let value: unknown
+      try { value = current === null ? {} : yaml.load(current) } catch { throw new AgendaError('INVALID_SETTINGS', '设置文件格式错误，未覆盖原件。') }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw new AgendaError('INVALID_SETTINGS', '设置文件须为对象，未覆盖原件。')
+      const next = { ...(value as Record<string, unknown>), weekStart: patch.weekStart }
+      const content = (value as Record<string, unknown>).weekStart === patch.weekStart && current !== null ? current : yaml.dump(next, { lineWidth: 120 })
+      return { value: undefined, content }
+    })
   }
 
   // ── 节假日 ──
@@ -380,9 +407,15 @@ export class CsvAgendaStorage implements AgendaStorage {
   }
 
   async readHolidayYear(year: number): Promise<HolidayYear | null> {
-    const data = await readYaml<unknown>(this.holidayPath(year))
-    if (data === null) return null
-    return parseHolidayYear(data, year)
+    let raw: string
+    try { raw = await readFile(this.holidayPath(year), 'utf8') } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      try { raw = await readFile(join(this.dataDir, 'holidays', `${year}.yml`), 'utf8') } catch (second) { if ((second as NodeJS.ErrnoException).code === 'ENOENT') return null; throw second }
+    }
+    try { return normalizeHolidayYear(yaml.load(raw), year) } catch (error) {
+      const reason = error instanceof AgendaError ? error.message : 'YAML 格式错误'
+      throw new AgendaError('INVALID_HOLIDAY_DATA', `${year} 年本地放假资料无效：${reason}；原件已保留。`)
+    }
   }
 
   async writeHolidayYear(data: HolidayYear): Promise<void> {

@@ -40,6 +40,8 @@ export interface AgendaStorage {
   // ── 设置 ──
   loadSettings(): Promise<AgendaSettings | null>
   saveSettings(settings: AgendaSettings): Promise<void>
+  settingsState(): Promise<{ settings: AgendaSettings, revision: string }>
+  updateSettings(patch: Partial<AgendaSettings>, expectedRevision: string): Promise<void>
 
   // ── 节假日 ──
   /** 已存在的节假日数据年份（升序）。 */

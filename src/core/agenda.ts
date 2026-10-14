@@ -24,6 +24,7 @@ import type {
   TodoPatch, TodoRecurrence,
 } from '../shared/types.ts'
 import type { AgendaStorage } from '../storage/storage.ts'
+import type { HolidaySource } from './holiday-data.ts'
 import { HolidayService } from './holidays.ts'
 import { AgendaError } from './errors.ts'
 import { normalizeCategoryPath } from './categories.ts'
@@ -33,8 +34,6 @@ import {
   LUNAR_MAX_YEAR, LUNAR_MIN_YEAR, nextDay, solarToLunar,
 } from './lunar.ts'
 
-/** 默认设置。 */
-const DEFAULT_SETTINGS: AgendaSettings = { weekStart: 'monday' }
 /** calendarInfo 支持的最大天数（防止滥用）。 */
 const MAX_CALENDAR_DAYS = 400
 /** 待办实例查询的最大天数（重复待办尤其 yearly 需要跨年查询）。 */
@@ -55,10 +54,37 @@ export class AgendaService {
   readonly holidays: HolidayService
   private readonly now: () => Date
   private dataVersion = 0
+  private mutationTail: Promise<void> = Promise.resolve()
+  private listeners = new Set<() => void>()
 
-  constructor(storage: AgendaStorage, options?: { now?: () => Date }) {
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  private changed(): void {
+    this.dataVersion += 1
+    for (const listener of this.listeners) { try { listener() } catch { /* 观察者不改变业务结果。 */ } }
+  }
+
+  private mutate<T>(action: () => Promise<T>): Promise<T> {
+    const result = this.mutationTail.then(action)
+    this.mutationTail = result.then(() => undefined, () => undefined)
+    return result
+  }
+
+  async updateSettings(patch: Partial<AgendaSettings>, expectedRevision: string): Promise<AgendaSnapshot> {
+    await this.mutate(async () => { await this.storage.updateSettings(patch, expectedRevision); this.changed() })
+    return this.snapshot()
+  }
+
+  async refreshHolidays(): Promise<void> {
+    await this.mutate(async () => { if (await this.holidays.refresh()) this.changed() })
+  }
+
+  constructor(storage: AgendaStorage, options?: { now?: () => Date, holidaySource?: HolidaySource }) {
     this.storage = storage
-    this.holidays = new HolidayService(storage)
+    this.holidays = new HolidayService(storage, options?.holidaySource)
     this.now = options?.now ?? (() => new Date())
   }
 
@@ -74,60 +100,65 @@ export class AgendaService {
 
   // ── 设置与快照 ─────────────────────────────────────────────────────────
 
-  /** 读取设置（缺省时写入默认值）。 */
+  /** 读取设置；缺省只返回默认值，不写用户文件。 */
   async settings(): Promise<AgendaSettings> {
-    const loaded = await this.storage.loadSettings()
-    if (loaded !== null) return loaded
-    await this.storage.saveSettings(DEFAULT_SETTINGS)
-    return { ...DEFAULT_SETTINGS }
+    return (await this.storage.settingsState()).settings
   }
 
   /** 全量快照（WS 建连与变更广播）。 */
   async snapshot(): Promise<AgendaSnapshot> {
-    const [events, todos, categories, settings] = await Promise.all([
-      this.storage.listEvents(),
-      this.storage.listTodos(),
-      this.storage.listCategories(),
-      this.settings(),
-    ])
-    return {
-      events: [...events].sort((a, b) => a.start.localeCompare(b.start)),
-      todos: [...todos].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
-      categories,
-      settings,
-      dataVersion: this.dataVersion,
-    }
+    return this.mutate(async () => {
+      const [events, todos, categories, settingState, holidayData] = await Promise.all([
+        this.storage.listEvents(),
+        this.storage.listTodos(),
+        this.storage.listCategories(),
+        this.storage.settingsState(),
+        this.holidays.summary(),
+      ])
+      return {
+        events: [...events].sort((a, b) => a.start.localeCompare(b.start)),
+        todos: [...todos].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+        categories,
+        settings: settingState.settings,
+        settingsRevision: settingState.revision,
+        holidayData,
+        dataVersion: this.dataVersion,
+      }
+    })
   }
 
   // ── Event ───────────────────────────────────────────────────────────────
 
   /** 创建日程；按 calendarType 走公历或农历路径。 */
   async createEvent(input: EventInput): Promise<AgendaEvent> {
-    this.assertTitle(input.title)
-    const category = this.eventCategory(input.category)
-    await this.registerCategoryIfNew(category)
-    const event: AgendaEvent = {
-      id: newId('e'),
-      title: input.title.trim(),
-      start: '',
-      end: '',
-      allDay: input.allDay === true,
-      calendarType: input.calendarType === 'lunar' ? 'lunar' : 'solar',
-      recurrence: 'none',
-      ...this.stamp(),
-    }
-    this.applyEventDates(event, input)
-    this.applyEventExtras(event, input)
-    if (category !== undefined) event.category = category
-    await this.storage.mutateEvents(events => {
-      if (events.some(existing => existing.id === event.id)) {
-        throw new AgendaError('INVALID_ARGUMENT', `日程 id 冲突: ${event.id}`)
+    return this.mutate(async () => {
+      this.assertTitle(input.title)
+      const category = this.eventCategory(input.category)
+      await this.registerCategoryIfNew(category)
+      const event: AgendaEvent = {
+        id: newId('e'),
+        title: input.title.trim(),
+        start: '',
+        end: '',
+        allDay: input.allDay === true,
+        calendarType: input.calendarType === 'lunar' ? 'lunar' : 'solar',
+        recurrence: 'none',
+        ...this.stamp(),
       }
-      events.push(event)
-      return { value: undefined }
+      this.applyEventDates(event, input)
+      this.applyEventExtras(event, input)
+      if (category !== undefined) event.category = category
+      await this.storage.mutateEvents(events => {
+        if (events.some(existing => existing.id === event.id)) {
+          throw new AgendaError('INVALID_ARGUMENT', `日程 id 冲突: ${event.id}`)
+        }
+        events.push(event)
+        return { value: undefined }
+      })
+      this.changed()
+      return event
+
     })
-    this.dataVersion += 1
-    return event
   }
 
   /** 查看单个日程。 */
@@ -141,57 +172,63 @@ export class AgendaService {
    * 保证无论公历→农历还是反向切换都能得到一致且可校验的结果。
    */
   async updateEvent(id: string, patch: EventPatch): Promise<AgendaEvent> {
-    if (patch.title !== undefined) this.assertTitle(patch.title)
-    const category = this.eventCategory(patch.category)
-    await this.registerCategoryIfNew(category)
-    const now = this.now().toISOString()
-    const updated = await this.storage.mutateEvents(events => {
-      const event = events.find(existing => existing.id === id)
-      if (event === undefined) throw new AgendaError('NOT_FOUND', `日程不存在: ${id}`)
+    return this.mutate(async () => {
+      if (patch.title !== undefined) this.assertTitle(patch.title)
+      const category = this.eventCategory(patch.category)
+      await this.registerCategoryIfNew(category)
+      const now = this.now().toISOString()
+      const updated = await this.storage.mutateEvents(events => {
+        const event = events.find(existing => existing.id === id)
+        if (event === undefined) throw new AgendaError('NOT_FOUND', `日程不存在: ${id}`)
 
-      const merged: EventInput = {
-        title: patch.title !== undefined ? patch.title : event.title,
-        calendarType: patch.calendarType ?? event.calendarType,
-        allDay: patch.allDay ?? event.allDay,
-      }
-      if (merged.calendarType === 'lunar') {
-        // 农历路径：start/end 由农历字段换算，忽略补丁里的公历字段
-        merged.lunarYear = patch.lunarYear ?? event.lunarYear
-        merged.lunarMonth = patch.lunarMonth ?? event.lunarMonth
-        merged.lunarDay = patch.lunarDay ?? event.lunarDay
-        merged.lunarLeap = patch.lunarLeap ?? event.lunarLeap
-        merged.startTime = patch.startTime ?? this.timeOf(event.start)
-        merged.endTime = patch.endTime ?? this.timeOf(event.end)
-      } else {
-        // 公历路径：start/end 直接取补丁或当前值
-        merged.start = patch.start ?? event.start
-        merged.end = patch.end
-      }
+        const merged: EventInput = {
+          title: patch.title !== undefined ? patch.title : event.title,
+          calendarType: patch.calendarType ?? event.calendarType,
+          allDay: patch.allDay ?? event.allDay,
+        }
+        if (merged.calendarType === 'lunar') {
+          // 农历路径：start/end 由农历字段换算，忽略补丁里的公历字段
+          merged.lunarYear = patch.lunarYear ?? event.lunarYear
+          merged.lunarMonth = patch.lunarMonth ?? event.lunarMonth
+          merged.lunarDay = patch.lunarDay ?? event.lunarDay
+          merged.lunarLeap = patch.lunarLeap ?? event.lunarLeap
+          merged.startTime = patch.startTime ?? this.timeOf(event.start)
+          merged.endTime = patch.endTime ?? this.timeOf(event.end)
+        } else {
+          // 公历路径：start/end 直接取补丁或当前值
+          merged.start = patch.start ?? event.start
+          merged.end = patch.end
+        }
 
-      event.title = merged.title.trim()
-      event.allDay = merged.allDay === true
-      event.calendarType = merged.calendarType === 'lunar' ? 'lunar' : 'solar'
-      this.applyEventDates(event, merged)
-      this.applyEventExtras(event, merged)
-      if (category !== undefined) event.category = category
-      else if (patch.category !== undefined) delete event.category
-      event.updatedAt = now
-      return { value: event }
+        event.title = merged.title.trim()
+        event.allDay = merged.allDay === true
+        event.calendarType = merged.calendarType === 'lunar' ? 'lunar' : 'solar'
+        this.applyEventDates(event, merged)
+        this.applyEventExtras(event, merged)
+        if (category !== undefined) event.category = category
+        else if (patch.category !== undefined) delete event.category
+        event.updatedAt = now
+        return { value: event }
+      })
+      this.changed()
+      return updated
+
     })
-    this.dataVersion += 1
-    return updated
   }
 
   /** 删除日程；返回被删除对象。 */
   async deleteEvent(id: string): Promise<AgendaEvent> {
-    const removed = await this.storage.mutateEvents(events => {
-      const index = events.findIndex(event => event.id === id)
-      if (index === -1) throw new AgendaError('NOT_FOUND', `日程不存在: ${id}`)
-      const [event] = events.splice(index, 1)
-      return { value: event }
+    return this.mutate(async () => {
+      const removed = await this.storage.mutateEvents(events => {
+        const index = events.findIndex(event => event.id === id)
+        if (index === -1) throw new AgendaError('NOT_FOUND', `日程不存在: ${id}`)
+        const [event] = events.splice(index, 1)
+        return { value: event }
+      })
+      this.changed()
+      return removed
+
     })
-    this.dataVersion += 1
-    return removed
   }
 
   /** 列出日期范围内的日程（默认全部，按开始时间排序）。 */
@@ -399,40 +436,43 @@ export class AgendaService {
 
   /** 创建待办。 */
   async createTodo(input: TodoInput): Promise<AgendaTodo> {
-    const title = input.title.trim()
-    if (title === '') throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
-    let date = input.date.trim()
-    if (!DATE_RE.test(date)) throw new AgendaError('INVALID_DATE', `待办日期非法（YYYY-MM-DD）: ${input.date}`)
-    this.assertDate(date)
-    const prepared = this.prepareTodoInput(input)
-    if (prepared.calendarType === 'lunar' && prepared.solarDate !== undefined) date = prepared.solarDate
-    const category = input.category !== undefined && input.category.trim() !== ''
-      ? normalizeCategoryPath(input.category)
-      : undefined
-    await this.registerCategoryIfNew(category)
-    const todo: AgendaTodo = {
-      id: newId('t'),
-      title,
-      date,
-      status: 'pending',
-      ...this.stamp(),
-      ...(prepared.recurrence !== undefined ? { recurrence: prepared.recurrence } : {}),
-      ...(prepared.calendarType === 'lunar' ? {
-        calendarType: prepared.calendarType,
-        lunarYear: prepared.lunarYear,
-        lunarMonth: prepared.lunarMonth,
-        lunarDay: prepared.lunarDay,
-        lunarLeap: prepared.lunarLeap,
-      } : {}),
-      ...(category !== undefined ? { category } : {}),
-      ...(input.description !== undefined && input.description.trim() !== '' ? { description: input.description.trim() } : {}),
-    }
-    await this.storage.mutateTodos(todos => {
-      todos.push(todo)
-      return { value: undefined }
+    return this.mutate(async () => {
+      const title = input.title.trim()
+      if (title === '') throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
+      let date = input.date.trim()
+      if (!DATE_RE.test(date)) throw new AgendaError('INVALID_DATE', `待办日期非法（YYYY-MM-DD）: ${input.date}`)
+      this.assertDate(date)
+      const prepared = this.prepareTodoInput(input)
+      if (prepared.calendarType === 'lunar' && prepared.solarDate !== undefined) date = prepared.solarDate
+      const category = input.category !== undefined && input.category.trim() !== ''
+        ? normalizeCategoryPath(input.category)
+        : undefined
+      await this.registerCategoryIfNew(category)
+      const todo: AgendaTodo = {
+        id: newId('t'),
+        title,
+        date,
+        status: 'pending',
+        ...this.stamp(),
+        ...(prepared.recurrence !== undefined ? { recurrence: prepared.recurrence } : {}),
+        ...(prepared.calendarType === 'lunar' ? {
+          calendarType: prepared.calendarType,
+          lunarYear: prepared.lunarYear,
+          lunarMonth: prepared.lunarMonth,
+          lunarDay: prepared.lunarDay,
+          lunarLeap: prepared.lunarLeap,
+        } : {}),
+        ...(category !== undefined ? { category } : {}),
+        ...(input.description !== undefined && input.description.trim() !== '' ? { description: input.description.trim() } : {}),
+      }
+      await this.storage.mutateTodos(todos => {
+        todos.push(todo)
+        return { value: undefined }
+      })
+      this.changed()
+      return todo
+
     })
-    this.dataVersion += 1
-    return todo
   }
 
   /** 查看单个待办（模板）。 */
@@ -490,116 +530,119 @@ export class AgendaService {
 
   /** 修改待办（模板字段 + 实例完成/重开）。 */
   async updateTodo(id: string, patch: TodoPatch): Promise<AgendaTodo> {
-    if (patch.title !== undefined && patch.title.trim() === '') {
-      throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
-    }
-    if (patch.date !== undefined) {
-      const date = patch.date.trim()
-      if (!DATE_RE.test(date)) throw new AgendaError('INVALID_DATE', `待办日期非法（YYYY-MM-DD）: ${patch.date}`)
-      this.assertDate(date)
-    }
-    if (patch.status !== undefined && patch.status !== 'pending' && patch.status !== 'completed') {
-      throw new AgendaError('INVALID_STATUS', `待办状态非法: ${patch.status}`)
-    }
-    if (patch.statusDate !== undefined) {
-      if (!DATE_RE.test(patch.statusDate)) throw new AgendaError('INVALID_DATE', `实例日期非法（YYYY-MM-DD）: ${patch.statusDate}`)
-      this.assertDate(patch.statusDate)
-    }
-    const category = patch.category !== undefined && patch.category.trim() !== ''
-      ? normalizeCategoryPath(patch.category)
-      : undefined
-    await this.registerCategoryIfNew(category)
-    const now = this.now().toISOString()
-    const updated = await this.storage.mutateTodos(todos => {
-      const todo = todos.find(existing => existing.id === id)
-      if (todo === undefined) throw new AgendaError('NOT_FOUND', `待办不存在: ${id}`)
-      if (patch.title !== undefined) todo.title = patch.title.trim()
-      if (patch.date !== undefined) todo.date = patch.date.trim()
+    return this.mutate(async () => {
+      if (patch.title !== undefined && patch.title.trim() === '') {
+        throw new AgendaError('INVALID_TITLE', '待办标题不能为空。')
+      }
+      if (patch.date !== undefined) {
+        const date = patch.date.trim()
+        if (!DATE_RE.test(date)) throw new AgendaError('INVALID_DATE', `待办日期非法（YYYY-MM-DD）: ${patch.date}`)
+        this.assertDate(date)
+      }
+      if (patch.status !== undefined && patch.status !== 'pending' && patch.status !== 'completed') {
+        throw new AgendaError('INVALID_STATUS', `待办状态非法: ${patch.status}`)
+      }
+      if (patch.statusDate !== undefined) {
+        if (!DATE_RE.test(patch.statusDate)) throw new AgendaError('INVALID_DATE', `实例日期非法（YYYY-MM-DD）: ${patch.statusDate}`)
+        this.assertDate(patch.statusDate)
+      }
+      const category = patch.category !== undefined && patch.category.trim() !== ''
+        ? normalizeCategoryPath(patch.category)
+        : undefined
+      await this.registerCategoryIfNew(category)
+      const now = this.now().toISOString()
+      const updated = await this.storage.mutateTodos(todos => {
+        const todo = todos.find(existing => existing.id === id)
+        if (todo === undefined) throw new AgendaError('NOT_FOUND', `待办不存在: ${id}`)
+        if (patch.title !== undefined) todo.title = patch.title.trim()
+        if (patch.date !== undefined) todo.date = patch.date.trim()
 
-      // ── 重复 / 农历字段 ──
-      if (patch.recurrence !== undefined || patch.calendarType !== undefined
-        || patch.lunarYear !== undefined || patch.lunarMonth !== undefined || patch.lunarDay !== undefined || patch.lunarLeap !== undefined) {
-        const prepared = this.prepareTodoInput({
-          title: patch.title ?? todo.title,
-          date: patch.date ?? todo.date,
-          recurrence: patch.recurrence === null ? undefined : patch.recurrence,
-          calendarType: patch.calendarType === null ? 'solar' : patch.calendarType,
-          lunarYear: patch.lunarYear,
-          lunarMonth: patch.lunarMonth,
-          lunarDay: patch.lunarDay,
-          lunarLeap: patch.lunarLeap,
-        })
-        if (patch.recurrence === null) {
-          delete todo.recurrence
-          delete todo.calendarType
-          delete todo.lunarYear
-          delete todo.lunarMonth
-          delete todo.lunarDay
-          delete todo.lunarLeap
-          // 清除重复：模板完成状态回到 status/completedAt
-          todo.status = todo.completedDates !== undefined && todo.completedDates.length > 0 ? 'completed' : 'pending'
-          delete todo.completedDates
-        } else {
-          if (prepared.recurrence !== undefined) todo.recurrence = prepared.recurrence
-          if (prepared.calendarType === 'lunar') {
-            todo.calendarType = 'lunar'
-            todo.lunarYear = prepared.lunarYear
-            todo.lunarMonth = prepared.lunarMonth
-            todo.lunarDay = prepared.lunarDay
-            todo.lunarLeap = prepared.lunarLeap
-            // 切农历且未显式改 date 时，用换算日覆盖
-            if (patch.date === undefined && prepared.solarDate !== undefined) todo.date = prepared.solarDate
-          } else {
+        // ── 重复 / 农历字段 ──
+        if (patch.recurrence !== undefined || patch.calendarType !== undefined
+          || patch.lunarYear !== undefined || patch.lunarMonth !== undefined || patch.lunarDay !== undefined || patch.lunarLeap !== undefined) {
+          const prepared = this.prepareTodoInput({
+            title: patch.title ?? todo.title,
+            date: patch.date ?? todo.date,
+            recurrence: patch.recurrence === null ? undefined : patch.recurrence,
+            calendarType: patch.calendarType === null ? 'solar' : patch.calendarType,
+            lunarYear: patch.lunarYear,
+            lunarMonth: patch.lunarMonth,
+            lunarDay: patch.lunarDay,
+            lunarLeap: patch.lunarLeap,
+          })
+          if (patch.recurrence === null) {
+            delete todo.recurrence
             delete todo.calendarType
             delete todo.lunarYear
             delete todo.lunarMonth
             delete todo.lunarDay
             delete todo.lunarLeap
-            // daily/weekly/monthly 或清除农历：已完成的实例保留，模板状态由 completedDates 派生
-            if (todo.completedDates !== undefined && todo.completedDates.length > 0) todo.status = 'completed'
-            else { todo.status = 'pending'; delete todo.completedDates }
+            // 清除重复：模板完成状态回到 status/completedAt
+            todo.status = todo.completedDates !== undefined && todo.completedDates.length > 0 ? 'completed' : 'pending'
+            delete todo.completedDates
+          } else {
+            if (prepared.recurrence !== undefined) todo.recurrence = prepared.recurrence
+            if (prepared.calendarType === 'lunar') {
+              todo.calendarType = 'lunar'
+              todo.lunarYear = prepared.lunarYear
+              todo.lunarMonth = prepared.lunarMonth
+              todo.lunarDay = prepared.lunarDay
+              todo.lunarLeap = prepared.lunarLeap
+              // 切农历且未显式改 date 时，用换算日覆盖
+              if (patch.date === undefined && prepared.solarDate !== undefined) todo.date = prepared.solarDate
+            } else {
+              delete todo.calendarType
+              delete todo.lunarYear
+              delete todo.lunarMonth
+              delete todo.lunarDay
+              delete todo.lunarLeap
+              // daily/weekly/monthly 或清除农历：已完成的实例保留，模板状态由 completedDates 派生
+              if (todo.completedDates !== undefined && todo.completedDates.length > 0) todo.status = 'completed'
+              else { todo.status = 'pending'; delete todo.completedDates }
+            }
           }
         }
-      }
 
-      if (category !== undefined) todo.category = category
-      else if (patch.category !== undefined) delete todo.category
-      if (patch.description !== undefined) {
-        const value = patch.description.trim()
-        if (value === '') delete todo.description
-        else todo.description = value
-      }
-
-      // ── 完成 / 重开 ──
-      if (patch.status !== undefined) {
-        if (todo.recurrence === undefined) {
-          // 单次待办：模板级
-          if (patch.status === 'completed' && todo.status !== 'completed') todo.completedAt = now
-          else if (patch.status === 'pending') delete todo.completedAt
-          todo.status = patch.status
-        } else if (patch.statusDate !== undefined) {
-          // 重复待办：指定日期实例
-          const list = new Set(todo.completedDates ?? [])
-          if (patch.status === 'completed') list.add(patch.statusDate)
-          else list.delete(patch.statusDate)
-          todo.completedDates = [...list].sort()
-          if (todo.completedDates.length === 0) delete todo.completedDates
-        } else if (patch.status === 'completed') {
-          // 重复待办未指定日期：完成下一个未完成实例
-          const next = this.nextPendingDate(todo)
-          if (next !== null) {
-            todo.completedDates = [...new Set([...(todo.completedDates ?? []), next])].sort()
-          }
-        } else {
-          // 重复待办重开（未指定日期）：清空全部实例完成
-          delete todo.completedDates
+        if (category !== undefined) todo.category = category
+        else if (patch.category !== undefined) delete todo.category
+        if (patch.description !== undefined) {
+          const value = patch.description.trim()
+          if (value === '') delete todo.description
+          else todo.description = value
         }
-      }
-      todo.updatedAt = now
-      return { value: todo }
+
+        // ── 完成 / 重开 ──
+        if (patch.status !== undefined) {
+          if (todo.recurrence === undefined) {
+            // 单次待办：模板级
+            if (patch.status === 'completed' && todo.status !== 'completed') todo.completedAt = now
+            else if (patch.status === 'pending') delete todo.completedAt
+            todo.status = patch.status
+          } else if (patch.statusDate !== undefined) {
+            // 重复待办：指定日期实例
+            const list = new Set(todo.completedDates ?? [])
+            if (patch.status === 'completed') list.add(patch.statusDate)
+            else list.delete(patch.statusDate)
+            todo.completedDates = [...list].sort()
+            if (todo.completedDates.length === 0) delete todo.completedDates
+          } else if (patch.status === 'completed') {
+            // 重复待办未指定日期：完成下一个未完成实例
+            const next = this.nextPendingDate(todo)
+            if (next !== null) {
+              todo.completedDates = [...new Set([...(todo.completedDates ?? []), next])].sort()
+            }
+          } else {
+            // 重复待办重开（未指定日期）：清空全部实例完成
+            delete todo.completedDates
+          }
+        }
+        todo.updatedAt = now
+        return { value: todo }
+      })
+      this.changed()
+      return updated
+
     })
-    this.dataVersion += 1
-    return updated
   }
 
   /** 下一个未完成的实例日期（用于无 date 的完成操作）；全部完成返回 null。 */
@@ -619,14 +662,17 @@ export class AgendaService {
 
   /** 删除待办；返回被删除对象。 */
   async deleteTodo(id: string): Promise<AgendaTodo> {
-    const removed = await this.storage.mutateTodos(todos => {
-      const index = todos.findIndex(todo => todo.id === id)
-      if (index === -1) throw new AgendaError('NOT_FOUND', `待办不存在: ${id}`)
-      const [todo] = todos.splice(index, 1)
-      return { value: todo }
+    return this.mutate(async () => {
+      const removed = await this.storage.mutateTodos(todos => {
+        const index = todos.findIndex(todo => todo.id === id)
+        if (index === -1) throw new AgendaError('NOT_FOUND', `待办不存在: ${id}`)
+        const [todo] = todos.splice(index, 1)
+        return { value: todo }
+      })
+      this.changed()
+      return removed
+
     })
-    this.dataVersion += 1
-    return removed
   }
 
   // ── 分类管理 ────────────────────────────────────────────────────────────
@@ -637,28 +683,34 @@ export class AgendaService {
 
   /** 新增分类（已存在则原样返回）。 */
   async createCategory(path: string): Promise<string[]> {
-    const normalized = normalizeCategoryPath(path)
-    await this.storage.mutateCategories(categories => {
-      if (!categories.includes(normalized)) {
-        categories.push(normalized)
-        categories.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
-      }
-      return { value: undefined }
+    return this.mutate(async () => {
+      const normalized = normalizeCategoryPath(path)
+      await this.storage.mutateCategories(categories => {
+        if (!categories.includes(normalized)) {
+          categories.push(normalized)
+          categories.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'))
+        }
+        return { value: undefined }
+      })
+      this.changed()
+      return this.storage.listCategories()
+
     })
-    this.dataVersion += 1
-    return this.storage.listCategories()
   }
 
   /** 删除分类（Event/Todo 上的引用保留为文本）。 */
   async deleteCategory(path: string): Promise<string[]> {
-    const normalized = normalizeCategoryPath(path)
-    await this.storage.mutateCategories(categories => {
-      const index = categories.indexOf(normalized)
-      if (index !== -1) categories.splice(index, 1)
-      return { value: undefined }
+    return this.mutate(async () => {
+      const normalized = normalizeCategoryPath(path)
+      await this.storage.mutateCategories(categories => {
+        const index = categories.indexOf(normalized)
+        if (index !== -1) categories.splice(index, 1)
+        return { value: undefined }
+      })
+      this.changed()
+      return this.storage.listCategories()
+
     })
-    this.dataVersion += 1
-    return this.storage.listCategories()
   }
 
   // ── 日历信息 ────────────────────────────────────────────────────────────

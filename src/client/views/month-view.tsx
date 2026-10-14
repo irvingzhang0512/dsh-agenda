@@ -6,6 +6,7 @@
  * 与当日日程条目（最多 3 条 + 溢出计数）。点击日期弹单日详情。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { AgendaEvent, DayInfo } from '../../shared/types.ts'
 import { eventDates } from '../../shared/types.ts'
 import { cellBgClass, lunarAccentOf } from '../day-cell.ts'
@@ -29,21 +30,22 @@ export function MonthView({
   onEditTodo: (mode: TodoEditorMode) => void
   onNewTodo: (date: string) => void
 }): React.ReactElement {
-  const { snapshot, client } = useAgenda()
-  const [year, setYear] = useState(() => Number(initialMonth.slice(0, 4)))
-  const [month, setMonth] = useState(() => Number(initialMonth.slice(5, 7)))
+  const { snapshot, client, connected } = useAgenda()
+  const [year, setYear] = usePersistentState('month.year', () => Number(initialMonth.slice(0, 4)))
+  const [month, setMonth] = usePersistentState('month.month', () => Number(initialMonth.slice(5, 7)))
   const [days, setDays] = useState<DayInfo[]>([])
-  const [detailDate, setDetailDate] = useState<string | null>(null)
+  const [detailDate, setDetailDate] = usePersistentState<string | null>('month.detailDate', null)
 
   const weekStart = snapshot?.settings.weekStart ?? 'monday'
 
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.monthInfo(year, month).then(info => {
       if (!stopped) setDays(info)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, year, month])
+  }, [client, connected, year, month, snapshot?.dataVersion])
 
   const eventsByDate = useMemo(() => {
     const map = new Map<string, AgendaEvent[]>()
@@ -129,6 +131,7 @@ export function MonthView({
 
   return (
     <div>
+      {snapshot && !snapshot.holidayData.supportedYears.includes(year) && !snapshot.holidayData.localOverrideYears.includes(year) && <p className="da-dim">放假安排未载入（{year} 年），仅按普通工作日与周末显示。</p>}
       <div className="da-cal">
         <div className="da-cal-header">
           <button type="button" className="da-btn" onClick={() => shift(-1)}>‹</button>

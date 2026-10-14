@@ -5,6 +5,8 @@
  * （未完成在前，可勾选完成）。右上角支持快速新建日程 / 待办。
  */
 import { useEffect, useMemo, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
+import { HolidayNotice } from '../holiday-notice.tsx'
 import type { AgendaEvent, AgendaTodo, TodoInstance, TodoRecurrence } from '../../shared/types.ts'
 import { eventDates, todayISO } from '../../shared/types.ts'
 import { cnDate, eventTimeText, useAgenda, weekdayCn } from '../agenda-context.tsx'
@@ -26,19 +28,20 @@ export function TodayView({
   onEditTodo: (mode: TodoEditorMode) => void
   onNewTodo: (date: string) => void
 }): React.ReactElement {
-  const { snapshot, todayInfo, client } = useAgenda()
-  const [quickTodo, setQuickTodo] = useState('')
+  const { snapshot, todayInfo, client, connected } = useAgenda()
+  const [quickTodo, setQuickTodo] = usePersistentState('today.quickTodo', '')
   const [dayInstances, setDayInstances] = useState<TodoInstance[]>([])
   const today = todayISO()
 
   // 今日待办实例（重复待办当天到期即出现）
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.listTodoInstances({ from: today, to: today }).then(list => {
       if (!stopped) setDayInstances(list)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, snapshot?.dataVersion, today])
+  }, [client, connected, snapshot?.dataVersion, today])
 
   const templates = useMemo(() => {
     const map = new Map<string, AgendaTodo>()
@@ -67,8 +70,7 @@ export function TodayView({
   const addQuickTodo = async (): Promise<void> => {
     const title = quickTodo.trim()
     if (title === '') return
-    setQuickTodo('')
-    await client.createTodo({ title, date: today }).catch(() => undefined)
+    await client.createTodo({ title, date: today }).then(() => setQuickTodo(current => current.trim() === title ? '' : current)).catch(() => undefined)
   }
 
   const toggleTodo = async (instance: TodoInstance, completed: boolean): Promise<void> => {
@@ -100,6 +102,7 @@ export function TodayView({
 
   return (
     <div>
+      <HolidayNotice years={[Number(today.slice(0, 4))]} />
       <div className="da-date-head">
         <span className="da-big">{cnDate(today)}</span>
         <span className={`da-sub ${todayInfo?.dayType === 'weekend' || todayInfo?.dayType === 'holiday' ? 'da-nonwork' : ''}`}>{weekdayCn(todayInfo?.weekday ?? 1)}</span>

@@ -44,12 +44,13 @@ export function AgendaProvider({ client, children }: { client: AgendaClient, chi
 
   // 预取今天的日历信息（农历年 / 节日 / 日期类型）
   useEffect(() => {
+    if (!connected) return
     let stopped = false
     void client.rangeInfo(todayISO(), todayISO()).then(days => {
       if (!stopped && days.length === 1) setTodayInfo(days[0] ?? null)
     }).catch(() => undefined)
     return () => { stopped = true }
-  }, [client, snapshot?.dataVersion])
+  }, [client, connected, snapshot?.dataVersion])
 
   const value: AgendaContextValue = { client, connected, error, snapshot, todayInfo }
   return <AgendaContext.Provider value={value}>{children}</AgendaContext.Provider>

@@ -1,93 +1,73 @@
 # dsh-agenda
 
-当前功能与验收以 [docs/SPEC.md](docs/SPEC.md) 为入口；原始需求保留为历史来源，技术契约见规格内的文档索引。功能任务先改规格与相关技术契约，用户明确确认该版文档后再开发；已确认同一版不重复询问。Bug 按已有且不变的预期查源码修复。
+在 DSH Desktop 中管理日程和待办：用月历、周历或自然语言创建日程，查看农历、放假与调休，按日期完成重复待办。数据保存在本地，页面与 Agent 共用同一份资料。
 
+## 能做什么
 
-DSH 个人日程管理插件。公历 + 农历双日历、Event 日程 / Todo 待办、法定节假日与调休、
-多级分类、统计与搜索；提供 **13 个 `agenda_*` 工具** 与 **agenda skill**，让 Agent 能用
-自然语言（含语音转写文本）直接操作日程。数据全部保存在本地
-`<DSH_DATA_DIR>/agenda/`，不依赖任何云服务。
-
-## 功能总览
-
-| 模块 | 能力 | 对应需求 |
-| --- | --- | --- |
-| Calendar | 月视图 / 周视图（周起始可配置） | §3 |
-| Today | 当日视图：今日日程 + 今日待办 + 快速添加 | §4 |
-| Event | 日程 CRUD：公历 / 农历、全天 / 定时、跨天、多级分类、地点、备注 | §5/§7 |
-| Todo | 待办 CRUD：单次／重复模板、按日期实例完成 / 重开、多级分类；当前规则见 SPEC F002 | §6（历史来源） |
-| 农历 | 正式能力：农历事件保留原始农历字段并换算公历；日历显示农历标注与传统节日 | §7 |
-| 节假日 | 法定节假日（休）/ 调休上班（班）标记，数据按年维护在 `holidays/<year>.yaml` | §8 |
-| 分类 | 路径式多级分类（层数不固定），首次引用自动登记 | §9 |
-| 统计 | 范围统计：日程数、定时时长、待办完成率、按分类聚合 | §10 |
-| 搜索 | 联合搜索日程与待办（标题 / 备注 / 分类），支持日期范围 | §11 |
-| 工具 | 13 个 `agenda_*` 确定性工具（结构化信封 + 文本投影） | §13 |
-| Skill | agenda skill：自然语言 → 工具映射 | §13 |
-| 语音 | 复用 DSH 的语音输入（STT），skill 只接收文本 | §12（预留，第一阶段不做提醒/微信） |
+- 今天、月历、周历、待办、统计、搜索六个页面。
+- 公历／农历日程，全天、定时、跨天、多级分类、地点和备注。
+- 单次及每天／每周／每月／每年的重复待办，按日期完成或重开实例。
+- chinese-days **1.5.9** 提供 **2004–2026** 年离线放假与调休资料，本地手工修改保留。
+- 13 个 agenda_* 工具和 agenda skill，工具写入即时刷新页面。
 
 ## 安装
 
-```bash
-# 在 DSH 插件工作区中
-dsh plugin --profile web add <本仓库路径>
-```
+**0.4.0 支持 DSH Desktop 0.2.0-rc.2**，无需其他自研侧栏插件。React 和原生控件由宿主模块表提供。
 
-插件挂载时自动：
-- 初始化 `<DSH_DATA_DIR>/agenda/`（`events.csv` / `todos.csv` / `categories.yaml` /
-  `settings.yaml` / `holidays/` / `backup/`）；
-- 把捆绑的官方节假日数据 seed 到 `holidays/`（已有年份不覆盖）；
-- 注册 13 个工具与 agenda skill；
-- 开启 `/agenda/ws` 桥，浏览器 UI 与 Agent 工具共用同一套 AgendaService。
+本轮交付预构建 **dsh-agenda-0.4.0.tgz**，已用 Desktop 内置 CLI 隔离安装和运行。[源码仓库](https://github.com/irvingzhang0512/dsh-agenda)本轮未推送／发布 0.4.0，远端旧版不能作为新版安装来源。
 
-## 数据与存储
+1. 获取维护者提供的 .tgz；源码维护者可执行 npm ci、npm pack，打包自动构建完整产物。
+2. 使用 **Desktop 安装包随附的插件 CLI** 执行参数 plugin --profile desktop add <tgz 的绝对路径>。这是内置 CLI 参数，不能套到旧全局 dsh／Web CLI。
+3. 安装并启用后点击左侧“日程”；今天页正常显示日期／农历、插件详情显示节假日库版本，即可使用。
 
-- 目录：`<DSH_DATA_DIR>/agenda/`（`DSH_DATA_DIR` 优先，其次 `$DSH_HOME/data/agenda`，
-  默认 `~/.dsh/data/agenda`）。
-- Event / Todo 存 CSV（列序固定，新增列追加尾部，解析按列名映射）；
-- 分类 / 设置 / 节假日存 YAML；
-- 所有写路径带文件锁 + `.tmp` 原子替换 + 自动备份（保留最近 10 份）。
-- CSV 只是 Storage 的一个实现：UI、语音、LLM 全部通过 AgendaService 访问数据。
+渠道和运行验证见 [0.4.0 验收记录](docs/VERIFICATION-0.4.0.md)。本轮交付没有更换日常环境。
 
-## 工具清单（13 个）
+## 配置
 
-`agenda_create_event` · `agenda_get_event` · `agenda_update_event` · `agenda_delete_event` ·
-`agenda_list_events` · `agenda_search_events` · `agenda_create_todo` · `agenda_update_todo` ·
-`agenda_complete_todo` · `agenda_delete_todo` · `agenda_list_todos` · `agenda_search_todos` ·
-`agenda_get_statistics`
+打开“插件 → dsh-agenda → 日程设置”：周起始日默认**周一**，可选周日。点击“保存设置”后月／周历即时更新。卡片还显示库版本、收录年份、本地覆盖和资料问题。
 
-所有工具返回统一信封 `{ ok, code, message, ... }`，失败返回结构化错误码而非抛错。
-完整约定见 `skills/agenda/SKILL.md` 与 `docs/architecture.md`。
+其他窗口修改过设置时，保存提示冲突并保留草稿。核对后用“重新读取”，确认放弃该项草稿再选择。保存仅更新周起始日，保留未知键。
 
-## 开发
+## 第一次使用
 
-```bash
-npm install
-npm run typecheck   # tsc --noEmit
-npm test            # vitest run（农历锚点 / 节假日 / 存储 / 服务 / 工具 / 线协议）
-npm run build       # clean → tsc 声明 → tsdown 打包 client
-```
+1. 点击“日程 → ＋ 新建日程”，填标题“项目评审”、日期和开始／结束时间，保存。
+2. 在今天或对应月历日期核对标题与时间，点击条目可编辑。
+3. 也可向已有可用模型发送：“明天下午三点到四点安排项目评审，分类是工作/项目。”Agent 调用工具后页面自动刷新；插件离线读取节假日。
 
-提交规范见 `AGENTS.md`（中文 Angular 提交信息，`git commit -F` 写入避免编码损坏）。
+## 常用操作
 
-## 目录结构
+| 想做什么 | 操作 |
+|---|---|
+| 记录农历生日 | 日程切换“农历”；每年待办可选“农历基准” |
+| 每天完成一项任务 | 新建待办选“每天”；勾选只完成对应日期实例 |
+| 查找和统计 | 搜索标题／分类；统计选择本周、本月或自定义 |
+| 保留输入 | 切换页面保留日期、筛选、搜索和编辑草稿；关闭有改动的弹窗先确认 |
 
-```
-dsh-agenda/
-├── src/
-│   ├── index.ts              # 宿主入口（装配 / 工具 / skill / WS 桥）
-│   ├── context-types.ts      # 结构服务面（tools/skills/webServer/webRuntime）
-│   ├── core/                 # AgendaService / 农历 / 节假日 / 分类 / 错误
-│   ├── storage/              # 存储接口 + CSV 实现 + 文件锁
-│   ├── shared/               # 领域类型、线协议、日期纯函数
-│   └── client/               # 浏览器 UI（月/周/今天/待办/统计/搜索 + 编辑器）
-├── skills/agenda/SKILL.md    # agenda skill（自注册）
-├── holidays/2025.yaml …      # 官方节假日数据（seed 源）
-├── tests/                    # vitest 测试套件
-└── docs/architecture.md      # 架构与约定文档
-```
+## 节假日与年度维护
 
-## 路线图（V0.2+，架构已预留）
+日常完全离线。维护者更新精确 chinese-days 依赖、验证并发布 Agenda 新版后，用户升级获得新增年度。未收录年份提示“放假安排未载入”，仅按普通工作日／周末判断，不预测调休。
 
-- 提醒 / 通知（微信等渠道）；
-- 重复日程（`recurrence` 字段已预留）；
-- 节假日数据在线更新。
+本地 agenda/holidays/<year>.yaml 可作为覆盖：
+
+- 没有文件使用库资料；旧 2025／2026 文件与固定旧基线比较，只有手改的新增／修改／删除日期覆盖库。
+- 删除旧基线的放假或调休标记，恢复该日期普通工作日／周末判断。
+- 没有旧比较基线的年度，保留整年本地资料优先。
+- 读取合并不改原件、注释或未知字段。年度文件变化自动刷新；错误显示原因，保留原件和上次有效结果或库默认。
+
+详细规则见 [节假日契约](docs/HOLIDAY-UPDATE-20261014.md)。包内原 2025／2026 YAML 永久保留为比较基线，停止复制默认年度文件。
+
+## 数据与使用边界
+
+目录为 <DSH_DATA_DIR>/agenda/；其次 $DSH_HOME/data/agenda，默认 ~/.dsh/data/agenda。日程／待办存 CSV，分类／设置／本地年度资料存 YAML。业务写入加锁、原子替换并保留最近 10 份备份。
+
+- 断线拒绝新操作；已发送后断线／超时提示“结果未确认，请刷新核对”。重连不重放写入；核对现有条目再决定是否提交。
+- 页面状态保留到插件卸载或重启，重启默认今天；已保存资料不受影响。
+- 重复事件、提醒、微信通知、定时联网更新不在本版范围。
+
+## 更多文档
+
+- [功能规格](docs/SPEC.md)、[更新记录](CHANGELOG.md)
+- [架构](docs/architecture.md)、[Desktop 契约](docs/DSH-UPGRADE-20261011.md)
+- [工具与自然语言映射](skills/agenda/SKILL.md)
+
+开发检查：npm run typecheck、npm test、npm run build；构建后 node scripts/verify-client.mjs 检查客户端依赖、插槽与清理。

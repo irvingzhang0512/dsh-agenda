@@ -159,11 +159,12 @@ export async function withLockedFile<T>(
   mutate: (current: string | null) => Promise<{ value: T, content: string }> | { value: T, content: string },
 ): Promise<T> {
   return withInProcessLock(path, async () => {
+    await mkdir(dirname(path), { recursive: true })
     const lock = await acquireFileLock(path)
     try {
-      const current = await readFile(path, 'utf8').catch(() => null)
+      const current = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => { if (error.code === 'ENOENT') return null; throw error })
       const outcome = await mutate(current)
-      await atomicWriteFile(path, outcome.content, options)
+      if (outcome.content !== current) await atomicWriteFile(path, outcome.content, options)
       return outcome.value
     } finally {
       await lock.release()

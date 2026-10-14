@@ -2,6 +2,8 @@
  * dsh-agenda — 应用壳：主导航 + 视图切换 + 全局编辑器状态。
  */
 import { useEffect, useState } from 'react'
+import { usePersistentState } from './persistent-state.ts'
+import { SegmentedTabs, Button } from './primitives.ts'
 import { AgendaProvider, useAgenda } from './agenda-context.tsx'
 import type { AgendaClient } from './api.ts'
 import { todayISO } from '../shared/types.ts'
@@ -19,12 +21,18 @@ import type { TodoEditorMode } from './components/todo-editor.tsx'
 type ViewKey = 'today' | 'month' | 'week' | 'todo' | 'stats' | 'search'
 
 function AgendaAppInner(): React.ReactElement {
-  const { connected, error } = useAgenda()
-  const [view, setView] = useState<ViewKey>('today')
-  const [editor, setEditor] = useState<EditorMode | null>(null)
-  const [todoEditor, setTodoEditor] = useState<TodoEditorMode | null>(null)
+  const { client, connected, error } = useAgenda()
+  const [view, setView] = usePersistentState<ViewKey>('app.view', 'today')
+  const [editor, setEditor] = usePersistentState<EditorMode | null>('app.editor', null)
+  const [todoEditor, setTodoEditor] = usePersistentState<TodoEditorMode | null>('app.todoEditor', null)
 
-  // 视图重新挂载的锚点（切回月/周时定位到今天）
+  const closeEditor = (prefix: string): void => {
+    for (const key of client.uiState.keys()) if (key.startsWith(prefix + '.')) client.uiState.delete(key)
+    if (prefix === 'eventEditor') setEditor(null)
+    else setTodoEditor(null)
+  }
+
+  // 每次客户端启动以今天为初始日期。
   const today = todayISO()
 
   const openNewEvent = (date?: string, hour?: string): void => {
@@ -38,23 +46,17 @@ function AgendaAppInner(): React.ReactElement {
     <div className="da-root">
       <div className="da-header">
         <h1>日程</h1>
-        <div className="da-nav">
-          <button type="button" className={view === 'today' ? 'da-active' : ''} onClick={() => setView('today')}>今天</button>
-          <button type="button" className={view === 'month' ? 'da-active' : ''} onClick={() => setView('month')}>月历</button>
-          <button type="button" className={view === 'week' ? 'da-active' : ''} onClick={() => setView('week')}>周历</button>
-          <button type="button" className={view === 'todo' ? 'da-active' : ''} onClick={() => setView('todo')}>待办</button>
-          <button type="button" className={view === 'stats' ? 'da-active' : ''} onClick={() => setView('stats')}>统计</button>
-          <button type="button" className={view === 'search' ? 'da-active' : ''} onClick={() => setView('search')}>搜索</button>
-        </div>
-        <button type="button" className="da-btn da-primary" onClick={() => openNewEvent()}>＋ 新建日程</button>
+        <SegmentedTabs className="da-nav" label="日程视图" value={view} onChange={value => setView(value as ViewKey)} items={[{value:'today',label:'今天'},{value:'month',label:'月历'},{value:'week',label:'周历'},{value:'todo',label:'待办'},{value:'stats',label:'统计'},{value:'search',label:'搜索'}]} />
+        <Button disabled={!connected} onClick={() => openNewEvent()}>＋ 新建日程</Button>
       </div>
 
       <div className="da-main">
         {!connected && (
           <div className="da-card" style={{ marginBottom: 12, color: 'var(--da-text-dim)' }}>
-            正在连接日程服务…{error !== null ? `（${error}）` : ''}
+            日程服务尚未连接；暂时无法提交操作。{error !== null ? `（${error}）` : ''}
           </div>
         )}
+        {connected && error && <div className="da-card" role="alert">{error} <button className="da-btn" onClick={() => void client.refresh().catch(() => undefined)}>刷新核对</button></div>}
         {view === 'today' && (
           <TodayView
             onEditEvent={setEditor}
@@ -96,8 +98,8 @@ function AgendaAppInner(): React.ReactElement {
         )}
       </div>
 
-      {editor !== null && <EventEditor mode={editor} onClose={() => setEditor(null)} />}
-      {todoEditor !== null && <TodoEditor mode={todoEditor} onClose={() => setTodoEditor(null)} />}
+      {editor !== null && <EventEditor mode={editor} onClose={() => closeEditor('eventEditor')} />}
+      {todoEditor !== null && <TodoEditor mode={todoEditor} onClose={() => closeEditor('todoEditor')} />}
     </div>
   )
 }

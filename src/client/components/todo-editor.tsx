@@ -5,8 +5,10 @@
  * 农历基准保留原始农历字段并自动换算公历日期。
  */
 import { useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { AgendaTodo, TodoInput, TodoRecurrence } from '../../shared/types.ts'
 import { todayISO } from '../../shared/types.ts'
+import { useDialog } from '../dialog.ts'
 import { useAgenda } from '../agenda-context.tsx'
 
 export type TodoEditorMode =
@@ -25,18 +27,25 @@ export function TodoEditor({ mode, onClose }: { mode: TodoEditorMode, onClose: (
   const { client, snapshot, todayInfo } = useAgenda()
   const editing = mode.kind === 'edit' ? mode.todo : null
   const createMode = mode.kind === 'create' ? mode : null
-  const [title, setTitle] = useState(editing?.title ?? '')
-  const [date, setDate] = useState(editing?.date ?? createMode?.date ?? todayISO())
-  const [category, setCategory] = useState(editing?.category ?? '')
-  const [description, setDescription] = useState(editing?.description ?? '')
-  const [recurrence, setRecurrence] = useState<TodoRecurrence | 'none'>(editing?.recurrence ?? 'none')
-  const [isLunar, setIsLunar] = useState(editing?.calendarType === 'lunar')
-  const [lunarYear, setLunarYear] = useState(editing?.lunarYear ?? todayInfo?.lunarYear ?? Number(todayISO().slice(0, 4)))
-  const [lunarMonth, setLunarMonth] = useState(editing?.lunarMonth ?? 1)
-  const [lunarDay, setLunarDay] = useState(editing?.lunarDay ?? 1)
-  const [lunarLeap, setLunarLeap] = useState(editing?.lunarLeap ?? false)
+  const [title, setTitle] = usePersistentState('todoEditor.title', editing?.title ?? '')
+  const [date, setDate] = usePersistentState('todoEditor.date', editing?.date ?? createMode?.date ?? todayISO())
+  const [category, setCategory] = usePersistentState('todoEditor.category', editing?.category ?? '')
+  const [description, setDescription] = usePersistentState('todoEditor.description', editing?.description ?? '')
+  const [recurrence, setRecurrence] = usePersistentState<TodoRecurrence | 'none'>('todoEditor.recurrence', editing?.recurrence ?? 'none')
+  const [isLunar, setIsLunar] = usePersistentState('todoEditor.isLunar', editing?.calendarType === 'lunar')
+  const [lunarYear, setLunarYear] = usePersistentState('todoEditor.lunarYear', editing?.lunarYear ?? todayInfo?.lunarYear ?? Number(todayISO().slice(0, 4)))
+  const [lunarMonth, setLunarMonth] = usePersistentState('todoEditor.lunarMonth', editing?.lunarMonth ?? 1)
+  const [lunarDay, setLunarDay] = usePersistentState('todoEditor.lunarDay', editing?.lunarDay ?? 1)
+  const [lunarLeap, setLunarLeap] = usePersistentState('todoEditor.lunarLeap', editing?.lunarLeap ?? false)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+
+  const draft = JSON.stringify([title, date, category, description, recurrence, isLunar, lunarYear, lunarMonth, lunarDay, lunarLeap])
+  const [baseline] = usePersistentState('todoEditor.baseline', draft)
+  const requestClose = (): void => {
+    if (!saving && (draft === baseline || window.confirm('放弃未保存的修改吗？'))) onClose()
+  }
+  const dialogRef = useDialog(requestClose)
 
   const categories = snapshot?.categories ?? []
 
@@ -91,13 +100,13 @@ export function TodoEditor({ mode, onClose }: { mode: TodoEditorMode, onClose: (
   }
 
   return (
-    <div className="da-modal" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div className="da-modal-card">
+    <div className="da-modal" onMouseDown={e => { if (e.target === e.currentTarget) requestClose() }}>
+      <div className="da-modal-card" ref={dialogRef} role="dialog" aria-modal="true" aria-label="待办编辑" tabIndex={-1}>
         <h2>{editing !== null ? '编辑待办' : '新建待办'}</h2>
         <div className="da-form">
           <div className="da-field">
             <label>标题 *</label>
-            <input className="da-input" value={title} onChange={e => setTitle(e.target.value)} autoFocus />
+            <input className="da-input" value={title} onChange={e => setTitle(e.target.value)} />
           </div>
 
           <div className="da-field">
@@ -154,7 +163,7 @@ export function TodoEditor({ mode, onClose }: { mode: TodoEditorMode, onClose: (
             {editing !== null && (
               <button type="button" className="da-btn da-danger" onClick={() => void remove()} disabled={saving}>删除</button>
             )}
-            <button type="button" className="da-btn" onClick={onClose} disabled={saving}>取消</button>
+            <button type="button" className="da-btn" onClick={requestClose} disabled={saving}>取消</button>
             <button type="button" className="da-btn da-primary" onClick={() => void save()} disabled={saving}>
               {saving ? '保存中…' : '保存'}
             </button>

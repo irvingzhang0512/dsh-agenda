@@ -3,7 +3,8 @@
  *
  * 联合搜索日程与待办（标题 / 备注 / 分类），可选日期范围过滤。
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { usePersistentState } from '../persistent-state.ts'
 import type { SearchResult } from '../../shared/types.ts'
 import { eventTimeText, useAgenda } from '../agenda-context.tsx'
 import type { EditorMode } from '../components/event-editor.tsx'
@@ -16,15 +17,25 @@ export function SearchView({
   onEditEvent: (mode: EditorMode) => void
   onEditTodo: (mode: TodoEditorMode) => void
 }): React.ReactElement {
-  const { client } = useAgenda()
-  const [query, setQuery] = useState('')
-  const [eventsFrom, setEventsFrom] = useState('')
-  const [eventsTo, setEventsTo] = useState('')
-  const [todosFrom, setTodosFrom] = useState('')
-  const [todosTo, setTodosTo] = useState('')
-  const [result, setResult] = useState<SearchResult | null>(null)
+  const { client, snapshot, connected } = useAgenda()
+  const [query, setQuery] = usePersistentState('search.query', '')
+  const [eventsFrom, setEventsFrom] = usePersistentState('search.eventsFrom', '')
+  const [eventsTo, setEventsTo] = usePersistentState('search.eventsTo', '')
+  const [todosFrom, setTodosFrom] = usePersistentState('search.todosFrom', '')
+  const [todosTo, setTodosTo] = usePersistentState('search.todosTo', '')
+  const [result, setResult] = usePersistentState<SearchResult | null>('search.result', null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const [submitted, setSubmitted] = usePersistentState<Record<string, unknown> | null>('search.submitted', null)
+  useEffect(() => {
+    if (!submitted) return
+    if (!connected) return
+    let stopped = false
+    setLoading(true); setError('')
+    void client.op<SearchResult>('search', submitted).then(found => { if (!stopped) setResult(found) }).catch(err => { if (!stopped) setError(String(err.message)) }).finally(() => { if (!stopped) setLoading(false) })
+    return () => { stopped = true }
+  }, [client, connected, submitted, snapshot?.dataVersion])
 
   const search = async (): Promise<void> => {
     const q = query.trim()
@@ -32,22 +43,11 @@ export function SearchView({
       setError('请输入搜索词。')
       return
     }
-    setLoading(true)
-    setError('')
-    try {
-      const found = await client.op<SearchResult>('search', {
-        query: q,
-        eventsFrom: eventsFrom === '' ? undefined : eventsFrom,
-        eventsTo: eventsTo === '' ? undefined : eventsTo,
-        todosFrom: todosFrom === '' ? undefined : todosFrom,
-        todosTo: todosTo === '' ? undefined : todosTo,
-      })
-      setResult(found)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setLoading(false)
-    }
+    setSubmitted({
+      query: q,
+      eventsFrom: eventsFrom || undefined, eventsTo: eventsTo || undefined,
+      todosFrom: todosFrom || undefined, todosTo: todosTo || undefined,
+    })
   }
 
   return (

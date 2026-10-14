@@ -1,76 +1,81 @@
-/**
- * dsh-agenda — HolidayService：法定节假日 / 调休工作日。
- *
- * 数据来源 `<dataDir>/holidays/<year>.yaml`（需求 §8）：
- *
- *   year: 2026
- *   holidays:
- *     - name: 春节
- *       dates: ['2026-02-15', ..., '2026-02-23']
- *   workdays:            # 调休上班日
- *     - '2026-02-14'
- *
- * 判定优先级：调休上班（班）> 法定节假日（休，带名称）> 周末 > 正常工作日。
- * 年数据带 60s 缓存；写入后立即失效。
- */
-import type { DayType } from '../shared/types.ts'
+/** 库默认值与本地覆盖，所有入口共享同一只读缓存。 */
+import type { DayType, HolidayDataSummary } from '../shared/types.ts'
 import type { AgendaStorage, HolidayYear } from '../storage/storage.ts'
+import { mergeHolidayYear, type HolidaySource } from './holiday-data.ts'
 
-/** 缓存 TTL：节假日数据极少变化。 */
-const CACHE_TTL_MS = 60_000
-
-/** 一天的人类可读判定结果。 */
-export interface DayKind {
-  type: DayType
-  /** 节假日名称（仅 type='holiday'）。 */
-  holidayName?: string
-}
+export interface DayKind { type: DayType, holidayName?: string }
 
 export class HolidayService {
-  private readonly storage: AgendaStorage
-  private readonly cache = new Map<number, { loadedAt: number, data: HolidayYear | null }>()
+  private cache = new Map<number, { loadedAt: number, data: HolidayYear | null }>()
+  private lastGood = new Map<number, HolidayYear | null>()
+  private state = new Map<number, { overridden: boolean, legacyFull: boolean, warning?: string }>()
+  private fingerprint = ''
+  constructor(private readonly storage: AgendaStorage, private readonly source?: HolidaySource) {}
 
-  constructor(storage: AgendaStorage) {
-    this.storage = storage
-  }
-
-  /** 读取某年数据（带缓存）。 */
   async loadYear(year: number): Promise<HolidayYear | null> {
     const cached = this.cache.get(year)
-    if (cached !== undefined && Date.now() - cached.loadedAt < CACHE_TTL_MS) return cached.data
-    const data = await this.storage.readHolidayYear(year)
-    this.cache.set(year, { loadedAt: Date.now(), data })
-    return data
+    if (cached && Date.now() - cached.loadedAt < 60_000) return cached.data
+    let base: HolidayYear | null = null, legacy: HolidayYear | null = null, warning: string | undefined
+    try { base = await this.source?.loadYear(year) ?? null } catch { warning = `${year} 年节假日库资料不可用。` }
+    let local: HolidayYear | null = null
+    try { local = await this.storage.readHolidayYear(year) } catch (error) {
+      warning = error instanceof Error ? error.message : `${year} 年本地放假资料无效，原件已保留。`
+      const data = this.lastGood.has(year) ? this.lastGood.get(year)! : base
+      const previous = this.state.get(year)
+      this.state.set(year, { overridden: previous?.overridden ?? false, legacyFull: previous?.legacyFull ?? false, warning })
+      this.cache.set(year, { loadedAt: Date.now(), data })
+      return data
+    }
+    if (local) try { legacy = await this.source?.legacyYear(year) ?? null } catch { warning = `${year} 年旧默认基线不可用，已保留本地整年资料。` }
+    const merged = mergeHolidayYear(base, local, legacy)
+    this.state.set(year, { overridden: merged.overridden, legacyFull: merged.legacyFull, ...(warning ? { warning } : {}) })
+    this.cache.set(year, { loadedAt: Date.now(), data: merged.data })
+    if (!warning) this.lastGood.set(year, merged.data)
+    return merged.data
   }
 
-  /** 写入某年数据并失效缓存。 */
   async writeYear(data: HolidayYear): Promise<void> {
     await this.storage.writeHolidayYear(data)
     this.cache.delete(data.year)
   }
 
-  /** 已有数据的年份列表（用于 UI 提示 / seed 检查）。 */
   async availableYears(): Promise<number[]> {
-    return this.storage.listHolidayYears()
+    const local = await this.storage.listHolidayYears()
+    const library = await this.source?.availableYears().catch(() => []) ?? []
+    return [...new Set([...local, ...library])].sort((a, b) => a - b)
   }
 
-  /**
-   * 判定某天的类型。
-   * @param date `YYYY-MM-DD`
-   * @param weekday 1=周一 … 7=周日
-   */
-  async dayKind(date: string, weekday: number): Promise<DayKind> {
-    const year = Number(date.slice(0, 4))
-    const data = await this.loadYear(Number.isFinite(year) ? year : 0)
-    if (data !== null) {
-      if (data.workdays.includes(date)) return { type: 'adjusted-workday' }
-      for (const holiday of data.holidays) {
-        if (holiday.dates.includes(date)) {
-          return { type: 'holiday', holidayName: holiday.name }
-        }
-      }
+  async summary(): Promise<HolidayDataSummary> {
+    const supportedYears = await this.source?.availableYears().catch(() => []) ?? []
+    const local = await this.storage.listHolidayYears()
+    await Promise.all([...new Set([...supportedYears, ...local])].map(year => this.loadYear(year)))
+    const entries = [...this.state].sort(([a], [b]) => a - b)
+    const summary: HolidayDataSummary = {
+      packageVersion: this.source?.packageVersion ?? 'local',
+      supportedYears,
+      localOverrideYears: entries.filter(([, s]) => s.overridden).map(([y]) => y),
+      legacyFullYears: entries.filter(([, s]) => s.legacyFull).map(([y]) => y),
+      warnings: entries.flatMap(([, s]) => s.warning ? [s.warning] : []),
     }
-    if (weekday === 6 || weekday === 7) return { type: 'weekend' }
-    return { type: 'workday' }
+    const live = new Set([...supportedYears, ...local])
+    this.fingerprint = JSON.stringify({ summary, data: [...this.cache].filter(([y]) => live.has(y)).sort(([a], [b]) => a - b).map(([y, s]) => [y, s.data]) })
+    return summary
+  }
+
+  async refresh(): Promise<boolean> {
+    const previous = this.fingerprint || (await this.summary(), this.fingerprint)
+    this.cache.clear()
+    const local = await this.storage.listHolidayYears(), supported = await this.source?.availableYears().catch(() => []) ?? []
+    const live = new Set([...local, ...supported])
+    for (const y of this.state.keys()) if (!live.has(y)) { this.state.delete(y); this.lastGood.delete(y) }
+    await this.summary()
+    return previous !== this.fingerprint
+  }
+
+  async dayKind(date: string, weekday: number): Promise<DayKind> {
+    const data = await this.loadYear(Number(date.slice(0, 4)))
+    if (data?.workdays.includes(date)) return { type: 'adjusted-workday' }
+    for (const h of data?.holidays ?? []) if (h.dates.includes(date)) return { type: 'holiday', holidayName: h.name }
+    return { type: weekday === 6 || weekday === 7 ? 'weekend' : 'workday' }
   }
 }
