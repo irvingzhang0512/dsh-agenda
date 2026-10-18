@@ -116,3 +116,8 @@ DSH Agent（13 个 agenda_* 工具，src/host/tools.ts）──┐
   `eventDates()` 层；
 - **语音**：DSH 输入层已完成 STT，agenda skill 直接消费文本，无需改动；
 - **更多节假日年份**：维护精确 chinese-days 依赖并发布 Agenda 新版；手工年度文件依旧可作为本地资料。
+
+
+## 2026-10-18 统一展示与套件交付契约
+
+依据用户已确认的 office-suite-implementation-20261018-v1。Irving · 日程与待办／Irving · Agenda，包 dsh-agenda 统一 0.2.1-rc.2+rev.1。展示资源通过 locale 导出提供；原条目 id、服务／工具／客户端身份、配置及存储保持。本插件保持独立安装。版本按完整字符串与固定散列核对；本节不授权原先待确认的业务扩展。

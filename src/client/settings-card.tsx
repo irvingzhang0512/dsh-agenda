@@ -30,7 +30,7 @@ function SettingsContent(): React.ReactElement {
   }
   const data = snapshot?.holidayData
   return <section className="da-root da-settings">
-    <h2>日程设置</h2>
+    <h2>Irving · 日程与待办</h2>
     <p>周起始日默认为周一，保存后立即更新月历和周历。</p>
     <SegmentedTabs label="周起始日" items={[{ value: 'monday', label: '周一' }, { value: 'sunday', label: '周日' }]} value={draft.weekStart} onChange={value => { if (!saving) setDraft({ ...draft, weekStart: value as 'monday' | 'sunday', dirty: true }) }} />
     <div className="da-row"><Button disabled={!connected || saving || !draft.dirty} onClick={() => void save()}>{saving ? '保存中…' : '保存设置'}</Button><Button disabled={!connected || saving} onClick={() => void reload()}>重新读取</Button></div>
