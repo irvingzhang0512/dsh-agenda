@@ -66,9 +66,13 @@
 
 ## 更多文档
 
-- [当前功能规格](docs/SPEC.md)：现有功能、边界与待确认内容。
+- [当前规格与待定需求索引](openspec/MIGRATION.md)：现有功能、边界与待确认内容。
 - [更新记录](CHANGELOG.md)：版本变化。
 - [架构与开发](docs/architecture.md)：数据、接口和实现约定。
 - [Agent 技能](skills/agenda/SKILL.md)：自然语言与工具操作规则。
 
 本次统一名称、版本与办公套件的实测范围见 [2026-10-18 验证记录](docs/VERIFICATION-OFFICE-20261018.md)。
+
+## 开发需求与规格
+
+后续开发通过 [OpenSpec迁移索引](openspec/MIGRATION.md) 查找当前能力与候选变更；新功能先完善提案、规格、设计及任务，确认具体版本后实施。原 [SPEC](docs/SPEC.md)与原始需求作为只读来源保留，旧F编号在索引中逐条映射。技术和使用说明仍保留原职责；本次只整理文档，不改变业务资料、安装状态或功能。
