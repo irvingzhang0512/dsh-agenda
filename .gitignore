@@ -1,6 +1,5 @@
 node_modules/
 .test-runs/
-lib/
 *.tmp
 *.log
 COMMIT_MSG*
