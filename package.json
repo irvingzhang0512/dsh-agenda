@@ -1,6 +1,6 @@
 {
   "name": "dsh-agenda",
-  "version": "0.2.1-rc.2+rev.1",
+  "version": "0.2.1-rc.3+rev.1",
   "description": "展示公历与农历日历、节假日和调休，支持日程、待办管理及 Agent 工具操作。",
   "type": "module",
   "main": "./lib/index.js",
@@ -33,7 +33,7 @@
   ],
   "engines": {
     "node": ">=20",
-    "dsh": "0.2.1-rc.2"
+    "dsh": "0.2.1-rc.3"
   },
   "dsh": {
     "bundle": {
@@ -71,12 +71,12 @@
     "chinese-days": "1.5.9"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh": "0.2.1-rc.2",
+    "@deepseek-ai/dsh": "0.2.1-rc.3",
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-client-ui-primitives": "0.2.1-rc.3",
     "@deepseek-ai/schemastery": "3.18.5"
   },
   "peerDependenciesMeta": {
@@ -92,8 +92,8 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.5",
-    "@deepseek-ai/dsh-skill": "0.2.1-rc.2",
-    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-skill": "0.2.1-rc.3",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3",
     "@deepseek-ai/schemastery": "3.18.5",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "24.19.2",
@@ -103,7 +103,7 @@
     "tsdown": "0.23.1",
     "typescript": "5.9.3",
     "vitest": "4.1.12",
-    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.2"
+    "@deepseek-ai/dsh-host-webserver": "0.2.1-rc.3"
   },
   "repository": {
     "type": "git",
