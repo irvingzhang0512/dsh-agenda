@@ -16,7 +16,7 @@
 import { mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join, normalize, parse } from 'node:path'
 
 /** 跨进程锁过期接管阈值。 */
 const STALE_MS = 10_000
@@ -25,7 +25,14 @@ const RETRY_MS = 40
 const ACQUIRE_TIMEOUT_MS = 8_000
 
 /** 解析 agenda 数据目录。 */
-export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+export function resolveDataDir(env: NodeJS.ProcessEnv = process.env, home: string = homedir(), override?: string): string {
+  if (override !== undefined && override !== '') {
+    if (typeof override !== 'string' || !isAbsolute(override) ||
+      (process.platform === 'win32' && parse(override).root.length <= 1)) {
+      throw new Error('日程 dataDir 必须为绝对路径')
+    }
+    return normalize(override)
+  }
   if (typeof env.DSH_DATA_DIR === 'string' && env.DSH_DATA_DIR !== '') {
     return join(env.DSH_DATA_DIR, 'agenda')
   }

@@ -15,6 +15,7 @@
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import { watch } from 'node:fs'
+import { access, constants } from 'node:fs/promises'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import { createHolidaySource } from './host/holiday-source.ts'
@@ -36,15 +37,16 @@ export const name = 'dsh-agenda'
 
 /** 必需服务：工具注册、WebSocket 升级面。Skill 条件注册。 */
 export const inject = ['tools', 'webServer']
-export const Config = z.object({})
+export const Config = z.object({ dataDir: z.string().description('日程数据的绝对目录；留空使用 DSH 数据目录。').default('') })
 
 /** 桥路径（与 client 半保持一致）。 */
 export const BRIDGE_PATH = '/agenda/ws'
 
 /** 插件主体；先完成目录与离线资料初始化，再公开服务。 */
-export async function apply(ctx: Context): Promise<void> {
-  const storage = new CsvAgendaStorage(resolveDataDir())
+export async function apply(ctx: Context, config: { dataDir?: string } = {}): Promise<void> {
+  const storage = new CsvAgendaStorage(resolveDataDir(process.env, undefined, config.dataDir))
   await storage.ensureLayout()
+  await access(storage.dataDir, constants.R_OK | constants.W_OK)
   const service = new AgendaService(storage, { holidaySource: createHolidaySource() })
   await service.holidays.summary()
   const bridge = new AgendaBridge()
@@ -56,11 +58,13 @@ export async function apply(ctx: Context): Promise<void> {
       if (!closed) { const snapshot = await service.snapshot(); if (!closed) bridge.broadcastSnapshot(snapshot) }
     }).catch(error => { ctx.logger?.warn?.(`[dsh-agenda] 快照刷新失败: ${String(error)}`) })
   }
-  ctx.effect(() => ctx.provide('agenda', {
+  const agenda = {
     id: 'dsh-agenda' as const,
     getSnapshot: () => service.snapshot(),
     getDataDir: () => storage.dataDir,
-  }), 'dsh-agenda: service')
+  }
+  ctx.effect(() => ctx.provide('agenda', agenda), 'dsh-agenda: service')
+  ctx.logger?.info?.(`[dsh-agenda] dataDir=${agenda.getDataDir()}`)
   ctx.effect(() => service.subscribe(publish), 'dsh-agenda: changes')
   ctx.effect(() => registerAgendaTools(ctx, { service }), 'dsh-agenda: tools')
   ctx.inject(['skills'], sctx => sctx.effect(() => {

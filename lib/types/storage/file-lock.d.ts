@@ -1,5 +1,5 @@
 /** 解析 agenda 数据目录。 */
-export declare function resolveDataDir(env?: NodeJS.ProcessEnv, home?: string): string;
+export declare function resolveDataDir(env?: NodeJS.ProcessEnv, home?: string, override?: string): string;
 /** 串行化同一路径的异步临界区（进程内）。 */
 export declare function withInProcessLock<T>(key: string, section: () => Promise<T>): Promise<T>;
 export interface AtomicWriteOptions {

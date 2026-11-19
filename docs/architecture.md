@@ -1,5 +1,7 @@
 # dsh-agenda 架构说明
 
+2026-11-19 · rev.2 支持在插件实例上指定绝对目录 `dataDir`。路径解析顺序为插件设置、`DSH_DATA_DIR/agenda`、`DSH_HOME/data/agenda`、用户默认目录。提供无效路径时报告初始化失败。
+
 当前技术契约对应 Agenda 0.4.0／DSH Desktop 0.2.0-rc.2。详细迁移与验收边界见 [Desktop v2](DSH-UPGRADE-20261011.md)、[节假日库 v2](HOLIDAY-UPDATE-20261014.md) 和 [验收记录](VERIFICATION-0.4.0.md)，用户已明确确认实施。
 
 ## 1. 总体分层

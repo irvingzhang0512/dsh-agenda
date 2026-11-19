@@ -5,9 +5,15 @@ import type { Context } from './context-types.ts';
 export declare const name = "dsh-agenda";
 /** 必需服务：工具注册、WebSocket 升级面。Skill 条件注册。 */
 export declare const inject: string[];
-export declare const Config: z<Schemastery.ObjectS<{}>, Schemastery.ObjectT<{}>, "plain">;
+export declare const Config: z<Schemastery.ObjectS<NoInfer<{
+    dataDir: z<string, string, "defined">;
+}>>, Schemastery.ObjectT<NoInfer<{
+    dataDir: z<string, string, "defined">;
+}>>, "plain">;
 /** 桥路径（与 client 半保持一致）。 */
 export declare const BRIDGE_PATH = "/agenda/ws";
 /** 插件主体；先完成目录与离线资料初始化，再公开服务。 */
-export declare function apply(ctx: Context): Promise<void>;
+export declare function apply(ctx: Context, config?: {
+    dataDir?: string;
+}): Promise<void>;
 export { stringifyHostMessage };
